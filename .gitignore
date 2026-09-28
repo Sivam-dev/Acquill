@@ -1,0 +1,67 @@
+# Environment Variables (NEVER COMMIT!)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+envs/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+learningtrack.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Docker volumes (if you want to exclude them)
+# Uncomment if needed:
+# docker-compose.override.yml
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+temp/
+tmp/
+
+# Test files (optional - you might want to commit these)
+test_*.py
+check_*.py
+verify_*.py
+show_*.py
+
+# Personal notes
+notes.txt
+TODO.txt
