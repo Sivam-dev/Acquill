@@ -17,6 +17,8 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 SESSION_FILE = Path.home() / ".acquill_session.json"
 
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 def save_session(session_data):
     """Save session to file for persistence"""
@@ -47,64 +49,32 @@ def clear_session():
         pass
 
 
-def get_supabase_client():
-    """Get supabase client with current session"""
-    session_data = load_session_data()
-    
-    if session_data and session_data.get('access_token'):
-        options = {
-            'headers': {
-                'Authorization': f"Bearer {session_data['access_token']}"
-            }
-        }
-        return create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
-    
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
-supabase = get_supabase_client()
-
-
 def signup(email: str, password: str):
-    client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    result = client.auth.sign_up({"email": email, "password": password})
+    result = supabase.auth.sign_up({"email": email, "password": password})
     if result.session:
         save_session({
             'access_token': result.session.access_token,
             'refresh_token': result.session.refresh_token
         })
-        global supabase
-        supabase = get_supabase_client()
     return result
 
 
 def signin(email: str, password: str):
-    client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    result = client.auth.sign_in_with_password({"email": email, "password": password})
+    result = supabase.auth.sign_in_with_password({"email": email, "password": password})
     if result.session:
         save_session({
             'access_token': result.session.access_token,
             'refresh_token': result.session.refresh_token
         })
-        global supabase
-        supabase = get_supabase_client()
     return result
 
 
 def signout():
-    try:
-        supabase.auth.sign_out()
-    except:
-        pass
+    result = supabase.auth.sign_out()
     clear_session()
-    global supabase
-    supabase = get_supabase_client()
-    return None
+    return result
 
 
 def get_current_user():
-    try:
-        user = supabase.auth.get_user()
-        return user
-    except:
-        return None
+    user = supabase.auth.get_user()
+    return user
