@@ -3,6 +3,7 @@ LangGraph workflow definitions - single consolidated file
 """
 
 from langgraph.graph import StateGraph, END
+from acquill.graphs.checkpoint import get_checkpointer
 from acquill.models import LearningState, ReminderState, DigestState, PatternState
 from acquill.nodes.chat_nodes import (
     init_state_node,
@@ -44,7 +45,7 @@ def build_chat_graph():
     workflow.add_edge("check_dependencies", "retrieve")
     workflow.add_edge("retrieve", "generate")
     workflow.add_edge("generate", END)
-    return workflow.compile()
+    return workflow.compile(checkpointer=get_checkpointer())
 
 
 def build_diff_graph():
@@ -61,7 +62,7 @@ def build_diff_graph():
     workflow.add_edge("check_dependencies", "retrieve")
     workflow.add_edge("retrieve", "generate")
     workflow.add_edge("generate", END)
-    return workflow.compile()
+    return workflow.compile(checkpointer=get_checkpointer())
 
 
 def build_reminder_graph():
@@ -74,7 +75,7 @@ def build_reminder_graph():
     workflow.add_edge("check", "quiz")
     workflow.add_edge("quiz", "send")
     workflow.add_edge("send", END)
-    return workflow.compile()
+    return workflow.compile(checkpointer=get_checkpointer())
 
 
 def build_digest_graph():
@@ -85,7 +86,7 @@ def build_digest_graph():
     workflow.set_entry_point("collect")
     workflow.add_edge("collect", "generate")
     workflow.add_edge("generate", END)
-    return workflow.compile()
+    return workflow.compile(checkpointer=get_checkpointer())
 
 
 def build_pattern_graph():
@@ -96,4 +97,4 @@ def build_pattern_graph():
     workflow.set_entry_point("collect")
     workflow.add_edge("collect", "analyze")
     workflow.add_edge("analyze", END)
-    return workflow.compile()
+    return workflow.compile(checkpointer=get_checkpointer())

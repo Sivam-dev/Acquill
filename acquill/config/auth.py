@@ -1,6 +1,7 @@
 import os
 import json
 from pathlib import Path
+import typer
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -15,29 +16,45 @@ if not SUPABASE_URL or not SUPABASE_KEY:
         "Get them from: https://supabase.com/dashboard/project/_/settings"
     )
 
-SESSION_FILE = Path.home() / ".acquill_session.json"
+SESSION_FILE = Path(typer.get_app_dir("acquill")) / "session.json"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def save_session(session_data):
-    """Save session to file for persistence"""
+def save_session(session):
+    """Save access + refresh tokens to the OS config folder for persistence"""
     try:
+        SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(SESSION_FILE, 'w') as f:
-            json.dump(session_data, f)
+            json.dump({
+                'access_token': session.access_token,
+                'refresh_token': session.refresh_token,
+            }, f)
     except Exception as e:
         print(f"Warning: Could not save session: {e}")
 
 
-def load_session_data():
-    """Load session data from file if it exists"""
+def restore_session() -> bool:
+    """Restore the saved session into the in-memory supabase client.
+
+    Returns False if no session file exists or restoring fails
+    (corrupted file, expired/invalid refresh token) — never raises.
+    """
     try:
-        if SESSION_FILE.exists():
-            with open(SESSION_FILE, 'r') as f:
-                return json.load(f)
+        if not SESSION_FILE.exists():
+            return False
+        with open(SESSION_FILE, 'r') as f:
+            data = json.load(f)
+        result = supabase.auth.set_session(
+            data['access_token'], data['refresh_token']
+        )
+        if result.session:
+            # Re-save: set_session may have refreshed the access token
+            save_session(result.session)
+            return True
+        return False
     except Exception:
-        pass
-    return None
+        return False
 
 
 def clear_session():
@@ -52,20 +69,14 @@ def clear_session():
 def signup(email: str, password: str):
     result = supabase.auth.sign_up({"email": email, "password": password})
     if result.session:
-        save_session({
-            'access_token': result.session.access_token,
-            'refresh_token': result.session.refresh_token
-        })
+        save_session(result.session)
     return result
 
 
 def signin(email: str, password: str):
     result = supabase.auth.sign_in_with_password({"email": email, "password": password})
     if result.session:
-        save_session({
-            'access_token': result.session.access_token,
-            'refresh_token': result.session.refresh_token
-        })
+        save_session(result.session)
     return result
 
 

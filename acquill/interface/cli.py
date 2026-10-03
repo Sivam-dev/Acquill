@@ -19,7 +19,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 
 from acquill.utils.api import process_message, process_diff, check_and_send_reminders, generate_weekly_digest, analyze_learning_patterns
-from acquill.config.auth import signup as auth_signup, signin as auth_signin, signout as auth_signout, get_current_user, supabase
+from acquill.config.auth import signup as auth_signup, signin as auth_signin, signout as auth_signout, get_current_user, restore_session, supabase
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -39,6 +39,13 @@ app = typer.Typer(
     help="AI Learning Companion - Chat and automatic code learning tracker",
     add_completion=False
 )
+
+
+def _require_session():
+    """Restore the saved login into the in-memory client, or exit cleanly."""
+    if not restore_session():
+        console.print("[yellow]Not logged in. Run `acquill login` first.[/yellow]")
+        raise typer.Exit()
 
 
 def background_git_checker():
@@ -122,7 +129,8 @@ def chat():
     Start interactive chat with Acquill.
     Also starts background git-diff monitoring in a separate thread.
     """
-    
+    _require_session()
+
     # Start background thread
     _stop_background.clear()
     bg_thread = threading.Thread(target=background_git_checker, daemon=True)
@@ -174,7 +182,8 @@ def chat():
 @app.command()
 def remind():
     """Check for overdue review reminders"""
-    
+    _require_session()
+
     console.print("\n⏰ [bold]Checking for overdue reviews...[/bold]\n")
     
     reminder = check_and_send_reminders()
@@ -190,7 +199,8 @@ def digest(
     days: int = typer.Option(7, "--days", "-d", help="Number of days to include in digest")
 ):
     """Generate a progress digest for the last N days"""
-    
+    _require_session()
+
     console.print(f"\n📊 [bold]Generating {days}-day digest...[/bold]\n")
     
     digest_text = generate_weekly_digest(days)
@@ -204,7 +214,8 @@ def digest(
 @app.command()
 def patterns():
     """Analyze recurring learning patterns"""
-    
+    _require_session()
+
     console.print("\n🔍 [bold]Analyzing learning patterns...[/bold]\n")
     
     insights = analyze_learning_patterns()
@@ -280,6 +291,7 @@ def logout():
 @app.command()
 def whoami():
     """Show current logged in user"""
+    _require_session()
     console.print("\n[bold cyan]👤 Current User[/bold cyan]\n")
     
     try:
