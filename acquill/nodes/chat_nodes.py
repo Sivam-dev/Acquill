@@ -157,8 +157,17 @@ def store_event_node(state: LearningState) -> LearningState:
     topic_name = state["topic"]
     event_type = state["event_type"]
     detail = state["detail"]
-    
+
     try:
+        user_resp = supabase.auth.get_user()
+        user = getattr(user_resp, "user", None)
+        user_id = getattr(user, "id", None)
+        if not user_id:
+            return {
+                **state,
+                "error": "Not logged in: cannot save learning event"
+            }
+
         result = supabase.table('topics').select('id, confidence_score, review_interval_days').eq('name', topic_name).execute()
         
         if result.data:
@@ -168,6 +177,7 @@ def store_event_node(state: LearningState) -> LearningState:
         else:
             new_topic = supabase.table('topics').insert({
                 'name': topic_name,
+                'user_id': user_id,
                 'confidence_score': 0.0,
                 'review_interval_days': 1
             }).execute()
@@ -177,6 +187,7 @@ def store_event_node(state: LearningState) -> LearningState:
         
         supabase.table('topic_history').insert({
             'topic_id': topic_id,
+            'user_id': user_id,
             'event_type': event_type,
             'details': detail
         }).execute()
@@ -213,6 +224,7 @@ def store_event_node(state: LearningState) -> LearningState:
         
         supabase.table('documents').insert({
             'topic_id': topic_id,
+            'user_id': user_id,
             'content': detail,
             'embedding': embedding_vector
         }).execute()
