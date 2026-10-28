@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-CHECK_INTERVAL = int(os.getenv("GIT_DIFF_CHECK_INTERVAL", "300"))  # seconds
+CHECK_INTERVAL = int(os.getenv("GIT_CHECK_INTERVAL", "300"))  # seconds
 
 # Rich console for styled output
 console = Console()
