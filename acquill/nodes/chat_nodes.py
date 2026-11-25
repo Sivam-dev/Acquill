@@ -3,7 +3,7 @@ Chat processing nodes for the learning graph
 """
 
 from datetime import datetime, timedelta
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from acquill.models import LearningState, ExtractedEvent, DiffAnalysis
 from acquill.prompts import (
@@ -323,15 +323,23 @@ def generate_reply_node(state: LearningState) -> LearningState:
         
         context = "\n\n".join(context_parts)
         
+        history = state.get("messages") or []
         response = reply_llm.invoke([
             SystemMessage(content=REPLY_SYSTEM_PROMPT),
+            *history,
             HumanMessage(content=context)
         ])
         
-        return {
+        update = {
             **state,
             "reply": response.content
         }
+        if state.get("user_message"):
+            update["messages"] = [
+                HumanMessage(content=state["user_message"]),
+                AIMessage(content=response.content)
+            ]
+        return update
         
     except Exception as e:
         return {

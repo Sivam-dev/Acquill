@@ -2,11 +2,14 @@
 State definitions for LangGraph workflows
 """
 
-from typing import TypedDict, Optional, List, Dict
+from typing import TypedDict, Optional, List, Dict, Annotated
+
+from langgraph.graph.message import add_messages
 
 
 class LearningState(TypedDict):
     """State for the main chat processing graph"""
+    messages: Annotated[list, add_messages]
     user_message: Optional[str]
     diff: Optional[str]
     filepath: Optional[str]
