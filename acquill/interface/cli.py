@@ -3,6 +3,8 @@ Acquill - Your AI Learning Companion CLI
 Interactive chat + background git-diff monitoring
 """
 
+import hashlib
+from itertools import cycle
 import os
 import sys
 import time
@@ -20,6 +22,7 @@ from rich.markdown import Markdown
 
 from acquill.utils.api import process_message, process_diff, check_and_send_reminders, generate_weekly_digest, analyze_learning_patterns
 from acquill.config.auth import signup as auth_signup, signin as auth_signin, signout as auth_signout, get_current_user, restore_session, supabase
+from acquill.graphs.checkpoint import SessionLostError, init_session
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -27,6 +30,32 @@ load_dotenv()
 
 # Configuration
 CHECK_INTERVAL = int(os.getenv("GIT_CHECK_INTERVAL", "300"))  # seconds
+
+# Shown when a check finds no uncommitted changes (used in order, then repeats)
+NUDGE_MESSAGES = (
+    "👀 No code changes yet — what are you working on? Start coding and I'll pick it up.",
+    "🤔 Still nothing to review. Make an edit in your editor and I'll analyse it.",
+    "💤 Quiet in here — no diff found. Time to write some code!",
+    "🚀 Nothing to track yet. Save a change and I'll be right on it.",
+)
+
+# Shown when the diff itself contains emoji
+EMOJI_NUDGE = "😄 Emojis in your code? I guess you're enjoying coding."
+
+
+def _has_emoji(text):
+    """Rough emoji check for diffs (pictographs and symbol blocks)."""
+    return any(
+        ord(ch) >= 0x1F000 or 0x2600 <= ord(ch) <= 0x27BF
+        for ch in text
+    )
+
+# Make stdout/stderr safe for emoji on non-UTF-8 terminals (e.g. Windows cp1252)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Rich console for styled output
 console = Console()
@@ -55,6 +84,9 @@ def background_git_checker():
     """
     console.print("[dim]🔍 Background git monitor started[/dim]")
     
+    last_seen = {}
+    idle_ticks = 0
+    nudges = cycle(NUDGE_MESSAGES)
     while not _stop_background.is_set():
         try:
             # Wait for the interval (but check stop flag every second)
@@ -68,24 +100,32 @@ def background_git_checker():
                 ["git", "diff"],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 cwd=os.getcwd()
             )
             
-            diff_output = result.stdout.strip()
+            diff_output = result.stdout.strip() if result.stdout else ""
             
-            # Skip if no changes
+            # Nothing changed: remind the user (first check, then every 4th)
             if not diff_output:
+                if idle_ticks % 4 == 0:
+                    console.print(f"[dim]{next(nudges)}[/dim]")
+                idle_ticks += 1
                 continue
+            idle_ticks = 0
             
             # Get changed files
             files_result = subprocess.run(
                 ["git", "diff", "--name-only"],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 cwd=os.getcwd()
             )
             
-            changed_files = files_result.stdout.strip().split("\n")
+            changed_files = files_result.stdout.strip().split("\n") if files_result.stdout else []
             
             # Process each changed file
             for filepath in changed_files:
@@ -97,16 +137,28 @@ def background_git_checker():
                     ["git", "diff", filepath],
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     cwd=os.getcwd()
                 )
                 
-                file_diff = file_diff_result.stdout.strip()
+                file_diff = file_diff_result.stdout.strip() if file_diff_result.stdout else ""
                 
                 if not file_diff:
                     continue
                 
+                digest = hashlib.sha1(
+                    file_diff.encode("utf-8", "replace")
+                ).hexdigest()
+                if last_seen.get(filepath) == digest:
+                    continue
+                
+                if _has_emoji(file_diff):
+                    console.print(f"[dim]{EMOJI_NUDGE}[/dim]")
+                
                 # Process through orchestration
                 response = process_diff(file_diff, filepath)
+                last_seen[filepath] = digest
                 
                 # Only print if not skipped (skip_storage was not set)
                 if response.get("reply"):
@@ -117,6 +169,11 @@ def background_git_checker():
                     console.print(f"[green]💬 Analysis:[/green] {response.get('reply', 'No analysis')}")
                     console.print("[dim]─────────────────────────────────[/dim]\n")
         
+        except SessionLostError:
+            # Session is gone for good - stop monitoring quietly.
+            _stop_background.set()
+            return
+
         except Exception as e:
             console.print(f"[red]Background check error: {str(e)}[/red]")
             # Don't kill the thread - just continue to next interval
@@ -130,6 +187,7 @@ def chat():
     Also starts background git-diff monitoring in a separate thread.
     """
     _require_session()
+    init_session()  # fresh thread for this run + clear leftover threads
 
     # Start background thread
     _stop_background.clear()
@@ -173,6 +231,10 @@ def chat():
         
         except KeyboardInterrupt:
             console.print("\n[yellow]👋 Interrupted. Goodbye![/yellow]")
+            _stop_background.set()
+            break
+        except SessionLostError as e:
+            console.print(f"\n[red]❌ {e}[/red]")
             _stop_background.set()
             break
         except Exception as e:
