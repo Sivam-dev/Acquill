@@ -10,9 +10,7 @@ import sys
 import time
 import threading
 import subprocess
-from typing import Optional
 
-# Add project root to path for imports (cli.py is at Acquill/interface/cli.py)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import typer
@@ -22,7 +20,28 @@ from rich.markdown import Markdown
 
 from acquill.utils.api import process_message, process_diff, check_and_send_reminders, generate_weekly_digest, analyze_learning_patterns
 from acquill.config.auth import signup as auth_signup, signin as auth_signin, signout as auth_signout, get_current_user, restore_session, supabase
+from acquill.config import (
+    config_exists,
+    get_config,
+    get_config_path,
+    mask_credential,
+    reset_config,
+    run_init_wizard
+)
 from acquill.graphs.checkpoint import SessionLostError, init_session
+from acquill.interface.ui_components import (
+    render_startup_screen,
+    render_welcome_panel,
+    render_user_message,
+    render_assistant_message,
+    render_thinking_indicator,
+    render_git_analysis,
+    render_error_message,
+    render_success_message,
+    render_config_display,
+    render_nudge_message,
+    get_input_prompt
+)
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -30,6 +49,8 @@ load_dotenv()
 
 # Configuration
 CHECK_INTERVAL = int(os.getenv("GIT_CHECK_INTERVAL", "300"))  # seconds
+# Max diff characters sent to the model per analysis (Groq TPM limits).
+MAX_DIFF_CHARS = int(os.getenv("GIT_DIFF_MAX_CHARS", "3000"))
 
 # Shown when a check finds no uncommitted changes (used in order, then repeats)
 NUDGE_MESSAGES = (
@@ -70,6 +91,158 @@ app = typer.Typer(
 )
 
 
+# ==================== Configuration Commands ====================
+
+@app.command()
+def init(
+    non_interactive: bool = typer.Option(False, "--non-interactive", help="Skip interactive prompts"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing configuration")
+):
+    """Initialize Acquill configuration"""
+    success = run_init_wizard(interactive=not non_interactive, force=force)
+    if not success:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="config")
+def config_cmd(
+    action: str = typer.Argument(..., help="Action: show, update, or reset")
+):
+    """Manage Acquill configuration (show, update, reset)"""
+    
+    if action == "show":
+        # Show current configuration with masked credentials
+        if not config_exists():
+            console.print("[yellow]⚠️  No configuration found. Run 'acquill init' first.[/yellow]\n")
+            raise typer.Exit(code=1)
+        
+        try:
+            config = get_config()
+            
+            # Mask credentials for display
+            display_config = {
+                'providers': {
+                    'groq': {
+                        'api_key': mask_credential(config['providers']['groq']['api_key']),
+                        'model': config['providers']['groq']['model']
+                    },
+                    'jina': {
+                        'api_key': mask_credential(config['providers']['jina']['api_key']),
+                        'model': config['providers']['jina']['model']
+                    }
+                },
+                'database': {
+                    'supabase_url': config['database']['supabase_url'],
+                    'supabase_key': mask_credential(config['database']['supabase_key']),
+                    'checkpoint_db_url': mask_credential(config['database']['checkpoint_db_url'], visible_chars=10)
+                }
+            }
+            
+            render_config_display(console, display_config)
+        
+        except Exception as e:
+            render_error_message(console, "Configuration Error", str(e))
+            raise typer.Exit(code=1)
+    
+    elif action == "update":
+        # Interactive update of credentials
+        if not config_exists():
+            console.print("[yellow]⚠️  No configuration found. Run 'acquill init' first.[/yellow]\n")
+            raise typer.Exit(code=1)
+        
+        try:
+            from acquill.config.validators import validate_groq_key, validate_jina_key
+            config = get_config()
+            
+            console.print("\n[bold cyan]Update Acquill Configuration[/bold cyan]\n")
+            console.print("What would you like to update?")
+            console.print("  1. Groq API Key")
+            console.print("  2. Jina AI API Key")
+            console.print("  3. Database credentials")
+            console.print("  0. Cancel\n")
+            
+            choice = console.input("[cyan]Enter choice (0-3):[/cyan] ").strip()
+            
+            if choice == "0":
+                console.print("[dim]Update cancelled.[/dim]\n")
+                return
+            
+            elif choice == "1":
+                new_key = console.input("[cyan]New Groq API Key:[/cyan] ", password=True).strip()
+                if new_key:
+                    console.print("[dim]Validating...[/dim]")
+                    valid, message = validate_groq_key(new_key)
+                    if valid:
+                        config["providers"]["groq"]["api_key"] = new_key
+                        from acquill.config.settings import save_config
+                        save_config(config)
+                        render_success_message(console, "Groq API key updated", message)
+                    else:
+                        render_error_message(console, "Validation Failed", message)
+            
+            elif choice == "2":
+                new_key = console.input("[cyan]New Jina AI API Key:[/cyan] ", password=True).strip()
+                if new_key:
+                    console.print("[dim]Validating...[/dim]")
+                    valid, message = validate_jina_key(new_key)
+                    if valid:
+                        config["providers"]["jina"]["api_key"] = new_key
+                        from acquill.config.settings import save_config
+                        save_config(config)
+                        render_success_message(console, "Jina AI API key updated", message)
+                    else:
+                        render_error_message(console, "Validation Failed", message)
+            
+            elif choice == "3":
+                console.print("\n[bold]Update Database Credentials[/bold]\n")
+                supabase_url = console.input(f"[cyan]Supabase URL [{config['database']['supabase_url']}]:[/cyan] ").strip()
+                supabase_key = console.input("[cyan]Supabase Key:[/cyan] ", password=True).strip()
+                checkpoint_url = console.input(f"[cyan]Checkpoint DB URL:[/cyan] ", password=True).strip()
+                
+                if supabase_url:
+                    config["database"]["supabase_url"] = supabase_url
+                if supabase_key:
+                    config["database"]["supabase_key"] = supabase_key
+                if checkpoint_url:
+                    config["database"]["checkpoint_db_url"] = checkpoint_url
+                
+                from acquill.config.settings import save_config
+                save_config(config)
+                render_success_message(console, "Database credentials updated")
+            
+            else:
+                console.print("[red]Invalid choice[/red]\n")
+        
+        except Exception as e:
+            render_error_message(console, "Update Failed", str(e))
+            raise typer.Exit(code=1)
+    
+    elif action == "reset":
+        # Reset configuration
+        if not config_exists():
+            console.print("[yellow]⚠️  No configuration found.[/yellow]\n")
+            return
+        
+        console.print("\n[bold red]⚠️  Reset Configuration[/bold red]\n")
+        console.print("[yellow]This will delete your configuration file.[/yellow]")
+        console.print("[dim]You can run 'acquill init' again to reconfigure.[/dim]\n")
+        
+        confirm = console.input("[cyan]Are you sure? Type 'yes' to confirm:[/cyan] ").strip()
+        
+        if confirm.lower() == "yes":
+            reset_config()
+            console.print(f"[green]✓ Configuration deleted: {get_config_path()}[/green]\n")
+        else:
+            console.print("[dim]Reset cancelled.[/dim]\n")
+    
+    else:
+        console.print(f"[red]✗ Unknown action '{action}'. Use: show, update, or reset[/red]\n")
+        raise typer.Exit(code=1)
+
+
+# ==================== Main Commands ====================
+
+
 def _require_session():
     """Restore the saved login into the in-memory client, or exit cleanly."""
     if not restore_session():
@@ -82,7 +255,7 @@ def background_git_checker():
     Background thread that periodically checks git diff and processes changes.
     Runs every CHECK_INTERVAL seconds until _stop_background is set.
     """
-    console.print("[dim]🔍 Background git monitor started[/dim]")
+    # Silently start monitoring (no message on startup)
     
     last_seen = {}
     idle_ticks = 0
@@ -110,7 +283,7 @@ def background_git_checker():
             # Nothing changed: remind the user (first check, then every 4th)
             if not diff_output:
                 if idle_ticks % 4 == 0:
-                    console.print(f"[dim]{next(nudges)}[/dim]")
+                    render_nudge_message(console, next(nudges))
                 idle_ticks += 1
                 continue
             idle_ticks = 0
@@ -127,118 +300,143 @@ def background_git_checker():
             
             changed_files = files_result.stdout.strip().split("\n") if files_result.stdout else []
             
-            # Process each changed file
-            for filepath in changed_files:
-                if not filepath:
-                    continue
+            # Filter out empty filenames
+            changed_files = [f for f in changed_files if f]
+            
+            if not changed_files:
+                continue
+            
+            # Check for emoji in the full diff
+            if _has_emoji(diff_output):
+                render_nudge_message(console, EMOJI_NUDGE)
+            
+            # Create a digest of the entire diff to avoid re-analyzing same changes
+            diff_digest = hashlib.sha1(diff_output.encode("utf-8", "replace")).hexdigest()
+            
+            # Skip if we've already seen this exact diff
+            if last_seen.get("__all__") == diff_digest:
+                continue
+            
+            # Build a summary of changed files
+            files_summary = ", ".join(changed_files[:5])  # Show max 5 files
+            if len(changed_files) > 5:
+                files_summary += f" and {len(changed_files) - 5} more"
+            
+            # Process the entire diff as one analysis (with error handling)
+            try:
+                # Stay inside the model's token limits: analyse the head only.
+                trimmed = diff_output
+                if len(trimmed) > MAX_DIFF_CHARS:
+                    trimmed = trimmed[:MAX_DIFF_CHARS] + "\n... [diff truncated to fit the model]"
+                response = process_diff(trimmed, files_summary)
+                last_seen["__all__"] = diff_digest
                 
-                # Get diff for this specific file
-                file_diff_result = subprocess.run(
-                    ["git", "diff", filepath],
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    cwd=os.getcwd()
-                )
-                
-                file_diff = file_diff_result.stdout.strip() if file_diff_result.stdout else ""
-                
-                if not file_diff:
-                    continue
-                
-                digest = hashlib.sha1(
-                    file_diff.encode("utf-8", "replace")
-                ).hexdigest()
-                if last_seen.get(filepath) == digest:
-                    continue
-                
-                if _has_emoji(file_diff):
-                    console.print(f"[dim]{EMOJI_NUDGE}[/dim]")
-                
-                # Process through orchestration
-                response = process_diff(file_diff, filepath)
-                last_seen[filepath] = digest
-                
-                # Only print if not skipped (skip_storage was not set)
+                # Display single analysis for all changes using new UI
                 if response.get("reply"):
-                    console.print("\n[dim]─── Background Code Analysis ───[/dim]")
-                    console.print(f"[cyan]📁 File:[/cyan] {filepath}")
-                    console.print(f"[yellow]📚 Topic:[/yellow] {response.get('topic', 'unknown')}")
-                    console.print(f"[magenta]⚡ Event:[/magenta] {response.get('event_type', 'unknown')}")
-                    console.print(f"[green]💬 Analysis:[/green] {response.get('reply', 'No analysis')}")
-                    console.print("[dim]─────────────────────────────────[/dim]\n")
-        
+                    render_git_analysis(
+                        console,
+                        files_changed=len(changed_files),
+                        files_summary=files_summary,
+                        topic=response.get('topic', 'unknown'),
+                        event_type=response.get('event_type', 'unknown'),
+                        analysis=response.get('reply', 'No analysis')
+                    )
+            except Exception as e:
+                # Friendly message instead of showing the error
+                render_nudge_message(
+                    console, 
+                    "I noticed some code changes but had trouble analyzing them. "
+                    "No worries though—keep coding! Your placement prep is what matters most. 🚀"
+                )
+                last_seen["__all__"] = diff_digest  # Mark as seen to avoid re-trying
         except SessionLostError:
             # Session is gone for good - stop monitoring quietly.
             _stop_background.set()
             return
 
         except Exception as e:
-            console.print(f"[red]Background check error: {str(e)}[/red]")
-            # Don't kill the thread - just continue to next interval
+            # Silently continue on errors
             continue
 
 
 @app.command()
-def chat():
+def chat(
+    git: bool = typer.Option(None, "--git/--no-git", help="Auto-analyse code changes in the background (default: on, per config)")
+):
     """
     Start interactive chat with Acquill.
-    Also starts background git-diff monitoring in a separate thread.
+    Also starts background git-diff monitoring in a separate thread (unless --no-git).
     """
     _require_session()
     init_session()  # fresh thread for this run + clear leftover threads
 
-    # Start background thread
+    # Git monitoring: CLI flag wins, otherwise the saved config (default on).
+    try:
+        from acquill.config import get_config
+        git_enabled = get_config().get("git_monitoring", True)
+    except Exception:
+        git_enabled = True
+    if git is not None:
+        git_enabled = git
+
+    # Display startup screen
+    render_startup_screen(console)
+    time.sleep(1)  # Brief pause for effect
+    console.clear()
+    
+    # Welcome panel
+    render_welcome_panel(console, CHECK_INTERVAL, git_enabled=git_enabled)
+
+    # Start background thread (only when git monitoring is enabled)
     _stop_background.clear()
-    bg_thread = threading.Thread(target=background_git_checker, daemon=True)
-    bg_thread.start()
-    
-    # Welcome message
-    console.print(Panel.fit(
-        "[bold cyan]Acquill - Your AI Learning Companion[/bold cyan]\n"
-        "Type your learning updates, questions, or struggles.\n"
-        "[dim]Type 'exit' to quit.[/dim]",
-        border_style="cyan"
-    ))
-    
-    console.print(f"[dim]Git diff monitoring: every {CHECK_INTERVAL}s[/dim]\n")
+    if git_enabled:
+        bg_thread = threading.Thread(target=background_git_checker, daemon=True)
+        bg_thread.start()
     
     # Main chat loop
     while True:
         try:
-            # Get user input
-            user_input = console.input("[bold cyan]>[/bold cyan] ").strip()
+            # Get user input with styled prompt
+            user_input = console.input(get_input_prompt()).strip()
             
             if not user_input:
                 continue
             
             if user_input.lower() in ["exit", "quit", "q"]:
-                console.print("[yellow]👋 See you next time! Keep learning![/yellow]")
+                console.print("\n[yellow]👋 See you next time! Keep learning![/yellow]\n")
                 _stop_background.set()  # Stop background thread
                 break
+            
+            # Show user message
+            render_user_message(console, user_input)
+            
+            # Show thinking indicator
+            render_thinking_indicator(console)
             
             # Process through orchestration
             response = process_message(user_input)
             
+            # Clear thinking indicator line (move cursor up and clear)
+            console.print("\033[A\033[K", end="")
+            
             # Display reply
             if response.get("error"):
-                console.print(f"[red]❌ Error: {response['error']}[/red]")
+                render_error_message(console, "Processing Error", response['error'])
             elif response.get("reply"):
-                console.print(f"\n[green]{response['reply']}[/green]\n")
+                render_assistant_message(console, response['reply'])
             else:
                 console.print("[dim]Message received (no reply generated)[/dim]\n")
         
         except KeyboardInterrupt:
-            console.print("\n[yellow]👋 Interrupted. Goodbye![/yellow]")
+            console.print("\n[yellow]👋 Interrupted. Goodbye![/yellow]\n")
             _stop_background.set()
             break
         except SessionLostError as e:
-            console.print(f"\n[red]❌ {e}[/red]")
+            render_error_message(console, "Session Lost", str(e))
             _stop_background.set()
             break
         except Exception as e:
-            console.print(f"[red]Error: {str(e)}[/red]")
+            render_error_message(console, "Unexpected Error", str(e))
 
 
 @app.command()
@@ -296,21 +494,24 @@ def signup():
     email = console.input("[cyan]Email:[/cyan] ").strip()
     
     if not email:
-        console.print("[red]❌ Email is required[/red]")
+        render_error_message(console, "Email is required")
         return
     
     password = console.input("[cyan]Password:[/cyan] ", password=True).strip()
     
     if not password:
-        console.print("[red]❌ Password is required[/red]")
+        render_error_message(console, "Password is required")
         return
     
     try:
         result = auth_signup(email, password)
-        console.print(f"\n[green]✅ Account created successfully![/green]")
-        console.print(f"[dim]Check your email to verify your account.[/dim]\n")
+        render_success_message(
+            console, 
+            "Account created successfully!",
+            "Check your email to verify your account."
+        )
     except Exception as e:
-        console.print(f"\n[red]❌ Signup failed: {str(e)}[/red]\n")
+        render_error_message(console, "Signup failed", str(e))
 
 
 @app.command()
@@ -321,21 +522,24 @@ def login():
     email = console.input("[cyan]Email:[/cyan] ").strip()
     
     if not email:
-        console.print("[red]❌ Email is required[/red]")
+        render_error_message(console, "Email is required")
         return
     
     password = console.input("[cyan]Password:[/cyan] ", password=True).strip()
     
     if not password:
-        console.print("[red]❌ Password is required[/red]")
+        render_error_message(console, "Password is required")
         return
     
     try:
         result = auth_signin(email, password)
-        console.print(f"\n[green]✅ Login successful![/green]")
-        console.print(f"[dim]Welcome back! You can now use all Acquill features.[/dim]\n")
+        render_success_message(
+            console,
+            "Login successful!",
+            "Welcome back! You can now use all Acquill features."
+        )
     except Exception as e:
-        console.print(f"\n[red]❌ Login failed: {str(e)}[/red]\n")
+        render_error_message(console, "Login failed", str(e))
 
 
 @app.command()
@@ -345,9 +549,9 @@ def logout():
     
     try:
         auth_signout()
-        console.print("[green]✅ Logged out successfully![/green]\n")
+        render_success_message(console, "Logged out successfully")
     except Exception as e:
-        console.print(f"[red]❌ Logout failed: {str(e)}[/red]\n")
+        render_error_message(console, "Logout failed", str(e))
 
 
 @app.command()
@@ -364,7 +568,7 @@ def whoami():
         else:
             console.print("[yellow]⚠️  Not logged in[/yellow]\n")
     except Exception as e:
-        console.print(f"[red]❌ Error: {str(e)}[/red]\n")
+        render_error_message(console, "Error retrieving user info", str(e))
 
 
 @app.command()
@@ -375,15 +579,18 @@ def reset_password():
     email = console.input("[cyan]Email:[/cyan] ").strip()
     
     if not email:
-        console.print("[red]❌ Email is required[/red]")
+        render_error_message(console, "Email is required")
         return
     
     try:
         supabase.auth.reset_password_email(email)
-        console.print(f"\n[green]✅ Password reset email sent![/green]")
-        console.print(f"[dim]Check your email for the reset link.[/dim]\n")
+        render_success_message(
+            console,
+            "Password reset email sent!",
+            "Check your email for the reset link."
+        )
     except Exception as e:
-        console.print(f"\n[red]❌ Failed to send reset email: {str(e)}[/red]\n")
+        render_error_message(console, "Failed to send reset email", str(e))
 
 
 if __name__ == "__main__":

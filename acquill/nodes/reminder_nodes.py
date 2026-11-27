@@ -5,10 +5,40 @@ Reminder and quiz generation nodes
 from datetime import datetime
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from acquill.models import ReminderState, QuizQuestion
-from acquill.prompts import QUIZ_SYSTEM_PROMPT_STRUCTURED
+from acquill.models import ReminderState
+from acquill.prompts import QUIZ_CODING_PROMPT
 from acquill.core import quiz_llm
 from acquill.config.auth import supabase
+
+
+def _time_since(iso_timestamp) -> str:
+    """Human-friendly gap since a timestamp, e.g. '3 days', '2 hours'.
+
+    The app writes last_touched_at with datetime.now().isoformat(), so the
+    stored wall-clock time is local; compare against local now.
+    """
+    if not iso_timestamp:
+        return "a while"
+
+    try:
+        then = datetime.fromisoformat(str(iso_timestamp).replace("Z", "+00:00"))
+    except ValueError:
+        return "a while"
+
+    delta = datetime.now() - then.replace(tzinfo=None)
+    if delta.total_seconds() < 0:
+        return "just now"
+
+    days = delta.days
+    if days >= 1:
+        return f"{days} day{'s' if days != 1 else ''}"
+
+    hours = delta.seconds // 3600
+    if hours >= 1:
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+
+    minutes = max(delta.seconds // 60, 1)
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
 
 
 def check_reminders_node(state: ReminderState) -> ReminderState:
@@ -45,17 +75,15 @@ def check_reminders_node(state: ReminderState) -> ReminderState:
 
 
 def generate_quiz_node(state: ReminderState) -> ReminderState:
-    """Generate quiz questions based on past struggles"""
+    """Generate ONE coding question from the most recent struggle"""
     
     overdue_topics = state.get("overdue_topics", [])
     
     if not overdue_topics:
         return {**state, "quiz_questions": []}
     
-    quiz_questions = []
-    
     try:
-        for topic in overdue_topics[:3]:
+        for topic in overdue_topics:
             result = supabase.table('topic_history').select('details').eq(
                 'topic_id', topic["id"]
             ).eq('event_type', 'struggled').order(
@@ -64,28 +92,26 @@ def generate_quiz_node(state: ReminderState) -> ReminderState:
             
             struggles = [row['details'] for row in result.data]
             
-            if struggles:
-                structured_llm = quiz_llm.with_structured_output(QuizQuestion)
-                system_prompt = QUIZ_SYSTEM_PROMPT_STRUCTURED.format(topic=topic["name"])
-                mistakes_text = "\n".join(f"- {s}" for s in struggles)
-                
-                response = structured_llm.invoke([
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=f"Past mistakes:\n{mistakes_text}")
-                ])
-                
-                quiz_questions.append({
+            if not struggles:
+                continue
+            
+            mistakes_text = "\n".join(f"- {s}" for s in struggles)
+            
+            response = quiz_llm.invoke([
+                SystemMessage(content=QUIZ_CODING_PROMPT.format(topic=topic["name"])),
+                HumanMessage(content=f"Past mistakes:\n{mistakes_text}")
+            ])
+            
+            return {
+                **state,
+                "quiz_questions": [{
                     "topic": topic["name"],
                     "topic_id": topic["id"],
-                    "question": response.question,
-                    "hint": response.hint,
-                    "learning_point": response.learning_point
-                })
+                    "question": response.content.strip()
+                }]
+            }
         
-        return {
-            **state,
-            "quiz_questions": quiz_questions
-        }
+        return {**state, "quiz_questions": []}
         
     except Exception as e:
         return {
@@ -110,15 +136,16 @@ def send_reminder_node(state: ReminderState) -> ReminderState:
     message_parts = ["⏰ **Time to review these topics:**\n"]
     
     for topic in overdue_topics:
+        touched = _time_since(topic.get("last_touched_at"))
         message_parts.append(
-            f"- **{topic['name']}** (confidence: {topic['confidence_score']:.0f}%)"
+            f"- **{topic['name']}** (confidence: {topic['confidence_score']:.0f}%, "
+            f"not touched for {touched})"
         )
     
     if quiz_questions:
-        message_parts.append("\n📝 **Quick quiz to refresh your memory:**\n")
-        for i, quiz in enumerate(quiz_questions, 1):
-            message_parts.append(f"\n**Q{i} ({quiz['topic']}):** {quiz['question']}")
-            message_parts.append(f"💡 Hint: {quiz['hint']}")
+        quiz = quiz_questions[0]
+        message_parts.append("\n📝 **Coding warm-up:**\n")
+        message_parts.append(f"**{quiz['topic']}:** {quiz['question']}")
     
     return {
         **state,

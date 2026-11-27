@@ -2,23 +2,55 @@ import os
 import json
 from pathlib import Path
 import typer
-from dotenv import load_dotenv
 from supabase import create_client, Client
 
-load_dotenv()
+# Global variables for lazy initialization
+_supabase_client = None
+SUPABASE_URL = None
+SUPABASE_KEY = None
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+def _ensure_supabase():
+    """Ensure Supabase client is initialized (lazy loading)"""
+    global _supabase_client, SUPABASE_URL, SUPABASE_KEY
+    
+    if _supabase_client is not None:
+        return _supabase_client
+    
+    # Load credentials
+    try:
+        from .settings import get_config
+        config = get_config()
+        SUPABASE_URL = config["database"]["supabase_url"]
+        SUPABASE_KEY = config["database"]["supabase_key"]
+    except Exception:
+        from dotenv import load_dotenv
+        load_dotenv()
+        SUPABASE_URL = os.getenv("SUPABASE_URL")
+        SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+    
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise ValueError(
+            "SUPABASE_URL and SUPABASE_KEY required.\n"
+            "Run 'acquill init' to configure Acquill or add them to .env file.\n"
+            "Get them from: https://supabase.com/dashboard/project/_/settings"
+        )
+    
+    _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError(
-        "SUPABASE_URL and SUPABASE_KEY required in .env file.\n"
-        "Get them from: https://supabase.com/dashboard/project/_/settings"
-    )
+# Provide supabase as a property that initializes on first access
+@property
+def supabase():
+    return _ensure_supabase()
+
+# For backward compatibility, create a module-level object
+class _SupabaseProxy:
+    def __getattr__(self, name):
+        return getattr(_ensure_supabase(), name)
+
+supabase: Client = _SupabaseProxy()
 
 SESSION_FILE = Path(typer.get_app_dir("acquill")) / "session.json"
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 def save_session(session):

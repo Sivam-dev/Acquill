@@ -59,11 +59,19 @@ def get_checkpointer():
     if _CHECKPOINTER is None:
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        db_url = os.getenv("CHECKPOINT_DB_URL")
+        # Try to load from config, fall back to .env
+        try:
+            from acquill.config.settings import get_config
+            config = get_config()
+            db_url = config["database"]["checkpoint_db_url"]
+        except Exception:
+            db_url = os.getenv("CHECKPOINT_DB_URL")
+        
         if not db_url:
             raise RuntimeError(
-                "CHECKPOINT_DB_URL is not set. Add your Supabase Postgres "
-                "connection string to .env (see .env.example)."
+                "CHECKPOINT_DB_URL is not set.\n"
+                "Run 'acquill init' to configure Acquill or add your Supabase "
+                "Postgres connection string to .env (see .env.example)."
             )
         _cm = PostgresSaver.from_conn_string(db_url)
         _CHECKPOINTER = _cm.__enter__()

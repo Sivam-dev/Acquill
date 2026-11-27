@@ -2,6 +2,7 @@
 Chat processing nodes for the learning graph
 """
 
+import logging
 from datetime import datetime, timedelta
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
@@ -9,10 +10,14 @@ from acquill.models import LearningState, ExtractedEvent, DiffAnalysis
 from acquill.prompts import (
     EXTRACT_SYSTEM_PROMPT_STRUCTURED,
     DIFF_ANALYSIS_PROMPT_STRUCTURED,
-    REPLY_SYSTEM_PROMPT
+    REPLY_SYSTEM_PROMPT,
+    QUIZ_CODING_PROMPT
 )
-from acquill.core import embeddings, extract_llm, diff_analysis_llm, reply_llm
+from acquill.core import embeddings, extract_llm, diff_analysis_llm, reply_llm, quiz_llm
+from acquill.core.dsa_map import canonical, prerequisites
 from acquill.config.auth import supabase
+
+logger = logging.getLogger(__name__)
 
 
 def init_state_node(state: LearningState) -> LearningState:
@@ -106,40 +111,86 @@ def analyze_diff_node(state: LearningState) -> LearningState:
         }
 
 
+def _dependency_status(events):
+    """Classify a prerequisite from its event history."""
+    struggles = [e["created_at"] for e in events if e["event_type"] == "struggled"]
+    solves = [e["created_at"] for e in events if e["event_type"] == "solved"]
+
+    if struggles and (not solves or max(struggles) > max(solves)):
+        return "unresolved"
+    if solves:
+        return "resolved"
+    if events:
+        return "seen"
+    return "new"
+
+
+def _has_solved(events):
+    return any(e["event_type"] == "solved" for e in events)
+
+
 def check_dependencies_node(state: LearningState) -> LearningState:
-    """Check if user has weak prerequisite knowledge"""
+    """Warn about weak prerequisites when the user starts a new topic."""
     
     if state.get("error") or state.get("skip_storage"):
         return state
     
-    topic_id = state.get("topic_id")
-    if not topic_id:
-        return state
+    topic = canonical(state.get("topic"))
+    if not topic:
+        return {**state, "weak_prerequisites": []}
+    
+    deps = prerequisites(topic, depth=1)
+    if not deps:
+        return {**state, "weak_prerequisites": []}
     
     try:
-        result = supabase.rpc('check_topic_dependencies', {
-            'p_topic_id': topic_id
-        }).execute()
+        topics = supabase.table("topics").select(
+            "id, name, confidence_score, next_review_at"
+        ).execute().data or []
         
-        weak_prerequisites = [
-            {
-                "name": row['name'],
-                "confidence": row['confidence_score'],
-                "recent_struggles": row['recent_struggles']
-            }
-            for row in result.data
-        ]
+        by_name = {}
+        for row in topics:
+            key = canonical(row.get("name"))
+            if key and key not in by_name:
+                by_name[key] = row
         
-        return {
-            **state,
-            "weak_prerequisites": weak_prerequisites
-        }
+        dep_rows = {d: by_name[d] for d in deps if d in by_name}
+        if not dep_rows:
+            return {**state, "weak_prerequisites": []}
         
-    except Exception as e:
-        return {
-            **state,
-            "weak_prerequisites": []
-        }
+        current = by_name.get(topic)
+        ids = [row["id"] for row in dep_rows.values()]
+        if current:
+            ids.append(current["id"])
+        
+        events = supabase.table("topic_history").select(
+            "topic_id, event_type, created_at"
+        ).in_("topic_id", ids).order("created_at", desc=True).limit(500).execute().data or []
+        
+        by_topic = {}
+        for event in events:
+            by_topic.setdefault(event["topic_id"], []).append(event)
+        
+        current_events = by_topic.get(current["id"], []) if current else []
+        if current and (len(current_events) > 1 or _has_solved(current_events)):
+            return {**state, "weak_prerequisites": []}
+        
+        weak = []
+        for name, row in dep_rows.items():
+            status = _dependency_status(by_topic.get(row["id"], []))
+            if status in ("unresolved", "seen"):
+                weak.append({
+                    "name": name,
+                    "status": status,
+                    "confidence": row["confidence_score"],
+                    "next_review_at": row.get("next_review_at")
+                })
+        
+        return {**state, "weak_prerequisites": weak}
+        
+    except Exception:
+        logger.warning("dependency check failed", exc_info=True)
+        return {**state, "weak_prerequisites": []}
 
 
 def store_event_node(state: LearningState) -> LearningState:
@@ -283,6 +334,19 @@ def retrieve_similar_node(state: LearningState) -> LearningState:
         }
 
 
+def _coding_question(topic_name):
+    """Generate one short coding question for a weak prerequisite."""
+    try:
+        response = quiz_llm.invoke([
+            SystemMessage(content=QUIZ_CODING_PROMPT.format(topic=topic_name)),
+            HumanMessage(content=f"Give me one coding question about {topic_name}.")
+        ])
+        return response.content.strip()
+    except Exception:
+        logger.warning("warm-up question generation failed", exc_info=True)
+        return None
+
+
 def generate_reply_node(state: LearningState) -> LearningState:
     """Generate empathetic reply based on event type and context"""
     
@@ -309,7 +373,7 @@ def generate_reply_node(state: LearningState) -> LearningState:
         
         if weak_prerequisites:
             prereq_text = "\n".join([
-                f"- {p['name']} (confidence: {p['confidence']}, recent struggles: {p['recent_struggles']})"
+                f"- {p['name']} ({p.get('status', 'weak')}, confidence: {p.get('confidence', 0)})"
                 for p in weak_prerequisites
             ])
             context_parts.append(f"\nWeak prerequisites:\n{prereq_text}")
@@ -330,14 +394,24 @@ def generate_reply_node(state: LearningState) -> LearningState:
             HumanMessage(content=context)
         ])
         
+        reply_text = response.content
+        if weak_prerequisites and state.get("user_message"):
+            warmup = weak_prerequisites[0]
+            question = _coding_question(warmup["name"])
+            if question:
+                reply_text = (
+                    f"{reply_text}\n\n"
+                    f"📝 **Quick warm-up ({warmup['name']}):**\n{question}"
+                )
+        
         update = {
             **state,
-            "reply": response.content
+            "reply": reply_text
         }
         if state.get("user_message"):
             update["messages"] = [
                 HumanMessage(content=state["user_message"]),
-                AIMessage(content=response.content)
+                AIMessage(content=reply_text)
             ]
         return update
         

@@ -7,7 +7,7 @@ from typing import Dict, Optional
 from datetime import datetime, timedelta
 
 from acquill.models import LearningState, ReminderState, DigestState, PatternState
-from acquill.graphs.checkpoint import get_thread_config
+from acquill.graphs.checkpoint import ensure_session_alive, get_thread_config
 from acquill.graphs.workflows import (
     build_chat_graph,
     build_diff_graph,
@@ -38,6 +38,7 @@ def process_message(user_message: str) -> Dict:
         error=None
     )
 
+    ensure_session_alive()
     result = chat_graph.invoke(initial_state, config=get_thread_config())
     
     return {
@@ -69,6 +70,7 @@ def process_diff(diff: str, filepath: str) -> Dict:
         error=None
     )
 
+    ensure_session_alive()
     result = diff_graph.invoke(initial_state, config=get_thread_config())
     
     return {
@@ -93,6 +95,7 @@ def check_and_send_reminders() -> Optional[str]:
         error=None
     )
     
+    ensure_session_alive()
     result = reminder_graph.invoke(initial_state, config=get_thread_config())
     return result.get("reminder_message")
 
@@ -112,6 +115,7 @@ def generate_weekly_digest(days=7) -> Optional[str]:
         error=None
     )
     
+    ensure_session_alive()
     result = digest_graph.invoke(initial_state, config=get_thread_config())
     return result.get("digest")
 
@@ -127,5 +131,6 @@ def analyze_learning_patterns() -> Optional[str]:
         error=None
     )
     
+    ensure_session_alive()
     result = pattern_graph.invoke(initial_state, config=get_thread_config())
     return result.get("insights")
