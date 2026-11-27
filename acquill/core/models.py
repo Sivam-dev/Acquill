@@ -48,43 +48,125 @@ QUIZ_MODEL = EXTRACT_MODEL
 DIGEST_MODEL = EXTRACT_MODEL
 PATTERN_MODEL = EXTRACT_MODEL
 
-embeddings = JinaEmbeddings(
-    jina_api_key=JINA_API_KEY,
-    model_name=JINA_MODEL
-)
 
-extract_llm = ChatGroq(
-    model=EXTRACT_MODEL,
-    temperature=0.7,
-    groq_api_key=GROQ_API_KEY
-)
+class _LazyClient:
+    """Stand-in that builds the real client on first use.
 
-diff_analysis_llm = ChatGroq(
-    model=DIFF_ANALYSIS_MODEL,
-    temperature=0.7,
-    groq_api_key=GROQ_API_KEY
-)
+    Importing this module must never fail (even `acquill init` needs to
+    import it before any keys exist), so when keys are missing at import
+    time we install a proxy and resolve keys when the client is first used.
+    """
 
-reply_llm = ChatGroq(
-    model=REPLY_MODEL,
-    temperature=0.7,
-    groq_api_key=GROQ_API_KEY
-)
+    def __init__(self, kind, model=None):
+        self._kind = kind
+        self._model = model
+        self._client = None
 
-quiz_llm = ChatGroq(
-    model=QUIZ_MODEL,
-    temperature=0.7,
-    groq_api_key=GROQ_API_KEY
-)
+    def _build(self):
+        groq_key, jina_key = _resolve_keys()
+        if self._kind == "embeddings":
+            if not jina_key:
+                raise ValueError(
+                    "JINA_API_KEY is required. "
+                    "Run 'acquill init' to set up Acquill."
+                )
+            return JinaEmbeddings(
+                jina_api_key=jina_key,
+                model_name=JINA_MODEL
+            )
+        if not groq_key:
+            raise ValueError(
+                "GROQ_API_KEY is required. "
+                "Run 'acquill init' to set up Acquill."
+            )
+        return ChatGroq(
+            model=self._model,
+            temperature=0.7,
+            groq_api_key=groq_key
+        )
 
-digest_llm = ChatGroq(
-    model=DIGEST_MODEL,
-    temperature=0.7,
-    groq_api_key=GROQ_API_KEY
-)
+    def _get(self):
+        if self._client is None:
+            self._client = self._build()
+        return self._client
 
-pattern_llm = ChatGroq(
-    model=PATTERN_MODEL,
-    temperature=0.7,
-    groq_api_key=GROQ_API_KEY
-)
+    def __getattr__(self, name):
+        return getattr(self._get(), name)
+
+
+def _resolve_keys():
+    """Re-read API keys (config file, then .env, then environment)."""
+    try:
+        from acquill.config.settings import get_config
+        config = get_config()
+        return (
+            config["providers"]["groq"]["api_key"] or None,
+            config["providers"]["jina"]["api_key"] or None
+        )
+    except Exception:
+        from dotenv import load_dotenv
+        load_dotenv()
+        return (os.getenv("GROQ_API_KEY") or None, os.getenv("JINA_API_KEY") or None)
+
+
+def _build_all():
+    """Construct every client eagerly; raises if any key is missing."""
+    return {
+        "embeddings": JinaEmbeddings(
+            jina_api_key=JINA_API_KEY,
+            model_name=JINA_MODEL
+        ),
+        "extract_llm": ChatGroq(
+            model=EXTRACT_MODEL,
+            temperature=0.7,
+            groq_api_key=GROQ_API_KEY
+        ),
+        "diff_analysis_llm": ChatGroq(
+            model=DIFF_ANALYSIS_MODEL,
+            temperature=0.7,
+            groq_api_key=GROQ_API_KEY
+        ),
+        "reply_llm": ChatGroq(
+            model=REPLY_MODEL,
+            temperature=0.7,
+            groq_api_key=GROQ_API_KEY
+        ),
+        "quiz_llm": ChatGroq(
+            model=QUIZ_MODEL,
+            temperature=0.7,
+            groq_api_key=GROQ_API_KEY
+        ),
+        "digest_llm": ChatGroq(
+            model=DIGEST_MODEL,
+            temperature=0.7,
+            groq_api_key=GROQ_API_KEY
+        ),
+        "pattern_llm": ChatGroq(
+            model=PATTERN_MODEL,
+            temperature=0.7,
+            groq_api_key=GROQ_API_KEY
+        ),
+    }
+
+
+try:
+    _clients = _build_all()
+except Exception:
+    _clients = None
+
+if _clients is not None:
+    embeddings = _clients["embeddings"]
+    extract_llm = _clients["extract_llm"]
+    diff_analysis_llm = _clients["diff_analysis_llm"]
+    reply_llm = _clients["reply_llm"]
+    quiz_llm = _clients["quiz_llm"]
+    digest_llm = _clients["digest_llm"]
+    pattern_llm = _clients["pattern_llm"]
+else:
+    embeddings = _LazyClient("embeddings")
+    extract_llm = _LazyClient("chat", EXTRACT_MODEL)
+    diff_analysis_llm = _LazyClient("chat", DIFF_ANALYSIS_MODEL)
+    reply_llm = _LazyClient("chat", REPLY_MODEL)
+    quiz_llm = _LazyClient("chat", QUIZ_MODEL)
+    digest_llm = _LazyClient("chat", DIGEST_MODEL)
+    pattern_llm = _LazyClient("chat", PATTERN_MODEL)
