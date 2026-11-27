@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acquill"
+version = "0.1.0"
+description = "AI Learning Companion - Chat and automatic code learning tracker"
+readme = "Readme.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "supabase>=2.0.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "psycopg[binary]>=3.2.0",
+    "langchain-groq>=0.2.0",
+    "langchain-community>=0.3.0",
+    "langchain-core>=0.3.0",
+]
+
+[project.scripts]
+acquill = "acquill.interface.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["acquill*"]
