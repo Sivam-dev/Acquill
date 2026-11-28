@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "acquill"
-version = "0.1.0"
+version = "0.1.1"
 description = "AI Learning Companion - Chat and automatic code learning tracker"
 readme = "Readme.md"
 license = { text = "MIT" }
