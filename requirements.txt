@@ -2,7 +2,7 @@
 python-dotenv>=1.0.0
 pydantic>=2.0.0
 
-# Supabase
+# Supabase (shared database + auth)
 supabase>=2.0.0
 
 # CLI Tools
@@ -11,18 +11,6 @@ rich>=13.7.0
 
 # LangChain & LangGraph
 langgraph>=0.2.0
-langgraph-checkpoint-postgres>=2.0.0
-psycopg[binary]>=3.2.0
-langchain>=0.3.0
 langchain-community>=0.3.0
-langchain-ollama>=0.2.0
 langchain-groq>=0.2.0
 langchain-core>=0.3.0
-langchain-google-genai>=2.0.0
-
-# Discord Bot (optional, for future)
-discord.py>=2.3.0
-requests>=2.31.0
-
-# Scheduling
-schedule>=1.2.0

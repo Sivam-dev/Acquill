@@ -6,7 +6,6 @@ import os
 from langchain_groq import ChatGroq
 from langchain_community.embeddings import JinaEmbeddings
 
-# Load configuration lazily to avoid import-time failures
 _config_loaded = False
 GROQ_API_KEY = None
 JINA_API_KEY = None
@@ -20,7 +19,6 @@ def _load_config():
     if _config_loaded:
         return
     
-    # Try to load config from settings, fall back to .env
     try:
         from acquill.config.settings import get_config
         config = get_config()
@@ -29,7 +27,6 @@ def _load_config():
         EXTRACT_MODEL = config["providers"]["groq"].get("model", "openai/gpt-oss-20b")
         JINA_MODEL = config["providers"]["jina"].get("model", "jina-embeddings-v2-base-en")
     except Exception:
-        # Fall back to .env
         from dotenv import load_dotenv
         load_dotenv()
         GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -39,14 +36,7 @@ def _load_config():
     
     _config_loaded = True
 
-# Load config immediately so module-level code works
 _load_config()
-
-DIFF_ANALYSIS_MODEL = EXTRACT_MODEL
-REPLY_MODEL = EXTRACT_MODEL
-QUIZ_MODEL = EXTRACT_MODEL
-DIGEST_MODEL = EXTRACT_MODEL
-PATTERN_MODEL = EXTRACT_MODEL
 
 
 class _LazyClient:
@@ -57,9 +47,8 @@ class _LazyClient:
     time we install a proxy and resolve keys when the client is first used.
     """
 
-    def __init__(self, kind, model=None):
+    def __init__(self, kind):
         self._kind = kind
-        self._model = model
         self._client = None
 
     def _build(self):
@@ -80,7 +69,7 @@ class _LazyClient:
                 "Run 'acquill init' to set up Acquill."
             )
         return ChatGroq(
-            model=self._model,
+            model=EXTRACT_MODEL,
             temperature=0.7,
             groq_api_key=groq_key
         )
@@ -111,41 +100,17 @@ def _resolve_keys():
 
 def _build_all():
     """Construct every client eagerly; raises if any key is missing."""
+    chat = ChatGroq(
+        model=EXTRACT_MODEL,
+        temperature=0.7,
+        groq_api_key=GROQ_API_KEY
+    )
     return {
         "embeddings": JinaEmbeddings(
             jina_api_key=JINA_API_KEY,
             model_name=JINA_MODEL
         ),
-        "extract_llm": ChatGroq(
-            model=EXTRACT_MODEL,
-            temperature=0.7,
-            groq_api_key=GROQ_API_KEY
-        ),
-        "diff_analysis_llm": ChatGroq(
-            model=DIFF_ANALYSIS_MODEL,
-            temperature=0.7,
-            groq_api_key=GROQ_API_KEY
-        ),
-        "reply_llm": ChatGroq(
-            model=REPLY_MODEL,
-            temperature=0.7,
-            groq_api_key=GROQ_API_KEY
-        ),
-        "quiz_llm": ChatGroq(
-            model=QUIZ_MODEL,
-            temperature=0.7,
-            groq_api_key=GROQ_API_KEY
-        ),
-        "digest_llm": ChatGroq(
-            model=DIGEST_MODEL,
-            temperature=0.7,
-            groq_api_key=GROQ_API_KEY
-        ),
-        "pattern_llm": ChatGroq(
-            model=PATTERN_MODEL,
-            temperature=0.7,
-            groq_api_key=GROQ_API_KEY
-        ),
+        "llm": chat,
     }
 
 
@@ -156,17 +121,7 @@ except Exception:
 
 if _clients is not None:
     embeddings = _clients["embeddings"]
-    extract_llm = _clients["extract_llm"]
-    diff_analysis_llm = _clients["diff_analysis_llm"]
-    reply_llm = _clients["reply_llm"]
-    quiz_llm = _clients["quiz_llm"]
-    digest_llm = _clients["digest_llm"]
-    pattern_llm = _clients["pattern_llm"]
+    llm = _clients["llm"]
 else:
     embeddings = _LazyClient("embeddings")
-    extract_llm = _LazyClient("chat", EXTRACT_MODEL)
-    diff_analysis_llm = _LazyClient("chat", DIFF_ANALYSIS_MODEL)
-    reply_llm = _LazyClient("chat", REPLY_MODEL)
-    quiz_llm = _LazyClient("chat", QUIZ_MODEL)
-    digest_llm = _LazyClient("chat", DIGEST_MODEL)
-    pattern_llm = _LazyClient("chat", PATTERN_MODEL)
+    llm = _LazyClient("chat")

@@ -4,7 +4,6 @@ from pathlib import Path
 import typer
 from supabase import create_client, Client
 
-# Global variables for lazy initialization
 _supabase_client = None
 SUPABASE_URL = None
 SUPABASE_KEY = None
@@ -16,7 +15,6 @@ def _ensure_supabase():
     if _supabase_client is not None:
         return _supabase_client
     
-    # Load credentials
     try:
         from .settings import get_config
         config = get_config()
@@ -38,12 +36,10 @@ def _ensure_supabase():
     _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     return _supabase_client
 
-# Provide supabase as a property that initializes on first access
 @property
 def supabase():
     return _ensure_supabase()
 
-# For backward compatibility, create a module-level object
 class _SupabaseProxy:
     def __getattr__(self, name):
         return getattr(_ensure_supabase(), name)
@@ -70,7 +66,7 @@ def restore_session() -> bool:
     """Restore the saved session into the in-memory supabase client.
 
     Returns False if no session file exists or restoring fails
-    (corrupted file, expired/invalid refresh token) — never raises.
+    (corrupted file, expired/invalid refresh token) - never raises.
     """
     try:
         if not SESSION_FILE.exists():
@@ -81,7 +77,6 @@ def restore_session() -> bool:
             data['access_token'], data['refresh_token']
         )
         if result.session:
-            # Re-save: set_session may have refreshed the access token
             save_session(result.session)
             return True
         return False

@@ -6,9 +6,12 @@ Guides users through first-time setup
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
+
+from acquill.interface.ui_components import render_logo
 
 from .settings import (
+    SHARED_SUPABASE_URL,
+    SHARED_SUPABASE_ANON_KEY,
     config_exists,
     save_config,
     migrate_from_env,
@@ -16,22 +19,10 @@ from .settings import (
 )
 from .validators import (
     validate_groq_key,
-    validate_jina_key,
-    validate_supabase,
-    validate_checkpoint_db_url
+    validate_jina_key
 )
 
 console = Console()
-
-# Simple ACQUILL branding for wizard
-WIZARD_LOGO = """
-   ___   _____  ____  __  __ _____ _      _     
-  / _ \ / ____|/ __ \|  \/  |_   _| |    | |    
- / /_\ | |  __| |  | | \  / | | | | |    | |    
-|  _  || | |_ | |  | | |\/| | | | | |    | |    
-| | | || |__| | |__| | |  | |_| |_| |____| |____
-|_| |_| \_____|\___\_\_|  |_|_____|______|______|
-"""
 
 
 def _prompt_with_default(prompt: str, default: str = "", password: bool = False) -> str:
@@ -67,18 +58,13 @@ def run_init_wizard(interactive: bool = True, force: bool = False) -> bool:
     """
     console.print()
     
-    # Display logo
-    logo_text = Text()
-    for line in WIZARD_LOGO.strip().split('\n'):
-        logo_text.append(line + "\n", style="bright_cyan")
-    console.print(logo_text, justify="center")
+    render_logo(console, show_tagline=False)
     
     console.print()
     console.print("[bold cyan]Initialization Wizard[/bold cyan]", justify="center")
     console.print("[dim]Your AI companion with persistent memory[/dim]", justify="center")
     console.print()
     
-    # Check if config already exists
     if config_exists() and not force:
         console.print("[yellow]⚠️  Configuration already exists.[/yellow]")
         reconfigure = console.input("[cyan]Do you want to reconfigure? (y/N):[/cyan] ").strip().lower()
@@ -89,7 +75,6 @@ def run_init_wizard(interactive: bool = True, force: bool = False) -> bool:
         
         console.print()
     
-    # Check for existing .env file
     env_exists = _check_env_file()
     import_from_env = False
     
@@ -99,7 +84,6 @@ def run_init_wizard(interactive: bool = True, force: bool = False) -> bool:
         import_from_env = import_choice not in ['n', 'no']
         console.print()
     
-    # Start building config
     config = {
         "version": "1.0",
         "providers": {
@@ -110,7 +94,6 @@ def run_init_wizard(interactive: bool = True, force: bool = False) -> bool:
         "git_check_interval": 300
     }
     
-    # Import from .env if requested
     if import_from_env:
         env_config = migrate_from_env()
         config["providers"]["groq"]["api_key"] = env_config["providers"]["groq"]["api_key"]
@@ -118,13 +101,11 @@ def run_init_wizard(interactive: bool = True, force: bool = False) -> bool:
         config["database"] = env_config["database"]
         config["git_check_interval"] = env_config["git_check_interval"]
     
-    # Non-interactive mode: use environment variables
     if not interactive:
         if not import_from_env:
             env_config = migrate_from_env()
             config = env_config
         
-        # Validate all credentials
         console.print("[dim]Validating credentials...[/dim]\n")
         
         groq_valid, groq_msg = validate_groq_key(config["providers"]["groq"]["api_key"])
@@ -141,7 +122,6 @@ def run_init_wizard(interactive: bool = True, force: bool = False) -> bool:
         console.print(f"[green]✓ Configuration saved to {get_config_path()}[/green]\n")
         return True
     
-    # Interactive mode: prompt for each credential
     console.print("[bold]Step 1: Groq API Configuration[/bold]")
     console.print("[dim]Groq provides the LLM for chat and analysis[/dim]\n")
     
@@ -200,70 +180,14 @@ def run_init_wizard(interactive: bool = True, force: bool = False) -> bool:
                 return False
             console.print()
     
-    console.print("[bold]Step 3: Database Configuration[/bold]")
-    console.print("[dim]Supabase stores your learning history and progress[/dim]\n")
+    console.print("[bold]Step 3: Shared Database[/bold]")
+    console.print("[dim]Acquill stores learning history in a shared Supabase project.[/dim]")
+    console.print("[dim]Your Groq and Jina keys stay yours - only the database is shared.[/dim]\n")
+    config["database"]["supabase_url"] = SHARED_SUPABASE_URL
+    config["database"]["supabase_key"] = SHARED_SUPABASE_ANON_KEY
+    config["database"]["checkpoint_db_url"] = ""
+    console.print("[green]✓ Using shared Acquill database[/green]\n")
     
-    while True:
-        supabase_url = _prompt_with_default(
-            "Supabase URL",
-            default=config["database"].get("supabase_url", "")
-        )
-        
-        supabase_key = _prompt_with_default(
-            "Supabase Key",
-            default=config["database"].get("supabase_key", ""),
-            password=True
-        )
-        
-        if not supabase_url or not supabase_key:
-            console.print("[red]✗ Both Supabase URL and key are required[/red]\n")
-            continue
-        
-        console.print("[dim]Validating Supabase credentials...[/dim]")
-        valid, message = validate_supabase(supabase_url, supabase_key)
-        
-        if valid:
-            console.print(f"[green]✓ {message}[/green]\n")
-            config["database"]["supabase_url"] = supabase_url
-            config["database"]["supabase_key"] = supabase_key
-            break
-        else:
-            console.print(f"[red]✗ {message}[/red]")
-            retry = console.input("[cyan]Try again? (Y/n):[/cyan] ").strip().lower()
-            if retry in ['n', 'no']:
-                console.print("[yellow]Initialization cancelled.[/yellow]\n")
-                return False
-            console.print()
-    
-    console.print("[bold]Step 4: Checkpoint Database Configuration[/bold]")
-    console.print("[dim]PostgreSQL URL for conversation persistence[/dim]\n")
-    
-    while True:
-        checkpoint_url = _prompt_with_default(
-            "Checkpoint DB URL",
-            default=config["database"].get("checkpoint_db_url", "")
-        )
-        
-        if not checkpoint_url:
-            console.print("[red]✗ Checkpoint DB URL is required[/red]\n")
-            continue
-        
-        console.print("[dim]Validating PostgreSQL URL...[/dim]")
-        valid, message = validate_checkpoint_db_url(checkpoint_url)
-        
-        if valid:
-            console.print(f"[green]✓ {message}[/green]\n")
-            config["database"]["checkpoint_db_url"] = checkpoint_url
-            break
-        else:
-            console.print(f"[red]✗ {message}[/red]")
-            retry = console.input("[cyan]Try again? (Y/n):[/cyan] ").strip().lower()
-            if retry in ['n', 'no']:
-                console.print("[yellow]Initialization cancelled.[/yellow]\n")
-                return False
-            console.print()
-    
-    # Save configuration
     try:
         save_config(config)
         console.print(Panel.fit(

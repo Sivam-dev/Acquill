@@ -19,7 +19,6 @@ def validate_groq_key(api_key: str) -> Tuple[bool, str]:
     try:
         from langchain_groq import ChatGroq
         
-        # Attempt a minimal completion
         llm = ChatGroq(
             model="openai/gpt-oss-20b",
             temperature=0.7,
@@ -27,7 +26,6 @@ def validate_groq_key(api_key: str) -> Tuple[bool, str]:
             max_tokens=10
         )
         
-        # Simple test message
         llm.invoke("test")
         
         return True, "Groq API key validated successfully"
@@ -58,13 +56,11 @@ def validate_jina_key(api_key: str) -> Tuple[bool, str]:
     try:
         from langchain_community.embeddings import JinaEmbeddings
         
-        # Attempt a minimal embedding
         embeddings = JinaEmbeddings(
             jina_api_key=api_key,
             model_name="jina-embeddings-v2-base-en"
         )
         
-        # Simple test embedding
         embeddings.embed_query("test")
         
         return True, "Jina AI API key validated successfully"
@@ -98,16 +94,12 @@ def validate_supabase(url: str, key: str) -> Tuple[bool, str]:
     try:
         from supabase import create_client
         
-        # Attempt to create client (doesn't make API call)
         client = create_client(url, key)
         
-        # Try a minimal query to verify credentials
-        # Using a table that likely exists (auth.users is system table)
         try:
             client.auth.get_session()
             return True, "Supabase credentials validated successfully"
         except Exception:
-            # Even if no session, the connection worked
             return True, "Supabase credentials appear valid"
     
     except Exception as e:
@@ -131,8 +123,6 @@ def validate_checkpoint_db_url(url: str) -> Tuple[bool, str]:
     if not url or not url.startswith("postgresql://"):
         return False, "Invalid PostgreSQL URL (should start with 'postgresql://')"
     
-    # Basic format validation
-    # postgresql://user:password@host:port/database
     parts = url.replace("postgresql://", "").split("@")
     if len(parts) != 2:
         return False, "Invalid PostgreSQL URL format"

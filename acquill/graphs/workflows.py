@@ -4,7 +4,7 @@ LangGraph workflow definitions - single consolidated file
 
 from langgraph.graph import StateGraph, END
 from acquill.graphs.checkpoint import get_checkpointer
-from acquill.models import LearningState, ReminderState, DigestState, PatternState
+from acquill.schemas import LearningState, ReminderState, DigestState, PatternState
 from acquill.nodes.chat_nodes import (
     init_state_node,
     extract_event_node,

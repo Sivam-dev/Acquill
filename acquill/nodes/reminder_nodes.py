@@ -5,9 +5,9 @@ Reminder and quiz generation nodes
 from datetime import datetime
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from acquill.models import ReminderState
+from acquill.schemas import ReminderState
 from acquill.prompts import QUIZ_CODING_PROMPT
-from acquill.core import quiz_llm
+from acquill.models import llm
 from acquill.config.auth import supabase
 
 
@@ -97,7 +97,7 @@ def generate_quiz_node(state: ReminderState) -> ReminderState:
             
             mistakes_text = "\n".join(f"- {s}" for s in struggles)
             
-            response = quiz_llm.invoke([
+            response = llm.invoke([
                 SystemMessage(content=QUIZ_CODING_PROMPT.format(topic=topic["name"])),
                 HumanMessage(content=f"Past mistakes:\n{mistakes_text}")
             ])

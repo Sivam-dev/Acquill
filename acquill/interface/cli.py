@@ -43,24 +43,19 @@ from acquill.interface.ui_components import (
     get_input_prompt
 )
 
-# Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
 
-# Configuration
-CHECK_INTERVAL = int(os.getenv("GIT_CHECK_INTERVAL", "300"))  # seconds
-# Max diff characters sent to the model per analysis (Groq TPM limits).
+CHECK_INTERVAL = int(os.getenv("GIT_CHECK_INTERVAL", "300"))
 MAX_DIFF_CHARS = int(os.getenv("GIT_DIFF_MAX_CHARS", "3000"))
 
-# Shown when a check finds no uncommitted changes (used in order, then repeats)
 NUDGE_MESSAGES = (
-    "👀 No code changes yet — what are you working on? Start coding and I'll pick it up.",
+    "👀 No code changes yet. What are you working on? Start coding and I'll pick it up.",
     "🤔 Still nothing to review. Make an edit in your editor and I'll analyse it.",
-    "💤 Quiet in here — no diff found. Time to write some code!",
+    "💤 Quiet in here. No diff found. Time to write some code!",
     "🚀 Nothing to track yet. Save a change and I'll be right on it.",
 )
 
-# Shown when the diff itself contains emoji
 EMOJI_NUDGE = "😄 Emojis in your code? I guess you're enjoying coding."
 
 
@@ -71,17 +66,14 @@ def _has_emoji(text):
         for ch in text
     )
 
-# Make stdout/stderr safe for emoji on non-UTF-8 terminals (e.g. Windows cp1252)
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
-# Rich console for styled output
 console = Console()
 
-# Global flag to stop background thread when chat exits
 _stop_background = threading.Event()
 
 app = typer.Typer(
@@ -91,7 +83,6 @@ app = typer.Typer(
 )
 
 
-# ==================== Configuration Commands ====================
 
 @app.command()
 def init(
@@ -111,7 +102,6 @@ def config_cmd(
     """Manage Acquill configuration (show, update, reset)"""
     
     if action == "show":
-        # Show current configuration with masked credentials
         if not config_exists():
             console.print("[yellow]⚠️  No configuration found. Run 'acquill init' first.[/yellow]\n")
             raise typer.Exit(code=1)
@@ -119,7 +109,6 @@ def config_cmd(
         try:
             config = get_config()
             
-            # Mask credentials for display
             display_config = {
                 'providers': {
                     'groq': {
@@ -134,7 +123,7 @@ def config_cmd(
                 'database': {
                     'supabase_url': config['database']['supabase_url'],
                     'supabase_key': mask_credential(config['database']['supabase_key']),
-                    'checkpoint_db_url': mask_credential(config['database']['checkpoint_db_url'], visible_chars=10)
+                    'checkpoint_db_url': config['database'].get('checkpoint_db_url') or 'in-memory sessions (not used)'
                 }
             }
             
@@ -145,7 +134,6 @@ def config_cmd(
             raise typer.Exit(code=1)
     
     elif action == "update":
-        # Interactive update of credentials
         if not config_exists():
             console.print("[yellow]⚠️  No configuration found. Run 'acquill init' first.[/yellow]\n")
             raise typer.Exit(code=1)
@@ -218,7 +206,6 @@ def config_cmd(
             raise typer.Exit(code=1)
     
     elif action == "reset":
-        # Reset configuration
         if not config_exists():
             console.print("[yellow]⚠️  No configuration found.[/yellow]\n")
             return
@@ -240,7 +227,6 @@ def config_cmd(
         raise typer.Exit(code=1)
 
 
-# ==================== Main Commands ====================
 
 
 def _require_session():
@@ -255,20 +241,17 @@ def background_git_checker():
     Background thread that periodically checks git diff and processes changes.
     Runs every CHECK_INTERVAL seconds until _stop_background is set.
     """
-    # Silently start monitoring (no message on startup)
     
     last_seen = {}
     idle_ticks = 0
     nudges = cycle(NUDGE_MESSAGES)
     while not _stop_background.is_set():
         try:
-            # Wait for the interval (but check stop flag every second)
             for _ in range(CHECK_INTERVAL):
                 if _stop_background.is_set():
                     return
                 time.sleep(1)
             
-            # Run git diff
             result = subprocess.run(
                 ["git", "diff"],
                 capture_output=True,
@@ -280,7 +263,6 @@ def background_git_checker():
             
             diff_output = result.stdout.strip() if result.stdout else ""
             
-            # Nothing changed: remind the user (first check, then every 4th)
             if not diff_output:
                 if idle_ticks % 4 == 0:
                     render_nudge_message(console, next(nudges))
@@ -288,7 +270,6 @@ def background_git_checker():
                 continue
             idle_ticks = 0
             
-            # Get changed files
             files_result = subprocess.run(
                 ["git", "diff", "--name-only"],
                 capture_output=True,
@@ -300,38 +281,30 @@ def background_git_checker():
             
             changed_files = files_result.stdout.strip().split("\n") if files_result.stdout else []
             
-            # Filter out empty filenames
             changed_files = [f for f in changed_files if f]
             
             if not changed_files:
                 continue
             
-            # Check for emoji in the full diff
             if _has_emoji(diff_output):
                 render_nudge_message(console, EMOJI_NUDGE)
             
-            # Create a digest of the entire diff to avoid re-analyzing same changes
             diff_digest = hashlib.sha1(diff_output.encode("utf-8", "replace")).hexdigest()
             
-            # Skip if we've already seen this exact diff
             if last_seen.get("__all__") == diff_digest:
                 continue
             
-            # Build a summary of changed files
-            files_summary = ", ".join(changed_files[:5])  # Show max 5 files
+            files_summary = ", ".join(changed_files[:5])
             if len(changed_files) > 5:
                 files_summary += f" and {len(changed_files) - 5} more"
             
-            # Process the entire diff as one analysis (with error handling)
             try:
-                # Stay inside the model's token limits: analyse the head only.
                 trimmed = diff_output
                 if len(trimmed) > MAX_DIFF_CHARS:
                     trimmed = trimmed[:MAX_DIFF_CHARS] + "\n... [diff truncated to fit the model]"
                 response = process_diff(trimmed, files_summary)
                 last_seen["__all__"] = diff_digest
                 
-                # Display single analysis for all changes using new UI
                 if response.get("reply"):
                     render_git_analysis(
                         console,
@@ -342,20 +315,17 @@ def background_git_checker():
                         analysis=response.get('reply', 'No analysis')
                     )
             except Exception as e:
-                # Friendly message instead of showing the error
                 render_nudge_message(
                     console, 
                     "I noticed some code changes but had trouble analyzing them. "
-                    "No worries though—keep coding! Your placement prep is what matters most. 🚀"
+                    "No worries though. Keep coding! Your placement prep is what matters most. 🚀"
                 )
-                last_seen["__all__"] = diff_digest  # Mark as seen to avoid re-trying
+                last_seen["__all__"] = diff_digest
         except SessionLostError:
-            # Session is gone for good - stop monitoring quietly.
             _stop_background.set()
             return
 
         except Exception as e:
-            # Silently continue on errors
             continue
 
 
@@ -368,9 +338,8 @@ def chat(
     Also starts background git-diff monitoring in a separate thread (unless --no-git).
     """
     _require_session()
-    init_session()  # fresh thread for this run + clear leftover threads
+    init_session()
 
-    # Git monitoring: CLI flag wins, otherwise the saved config (default on).
     try:
         from acquill.config import get_config
         git_enabled = get_config().get("git_monitoring", True)
@@ -379,24 +348,19 @@ def chat(
     if git is not None:
         git_enabled = git
 
-    # Display startup screen
     render_startup_screen(console)
-    time.sleep(1)  # Brief pause for effect
+    time.sleep(1)
     console.clear()
     
-    # Welcome panel
     render_welcome_panel(console, CHECK_INTERVAL, git_enabled=git_enabled)
 
-    # Start background thread (only when git monitoring is enabled)
     _stop_background.clear()
     if git_enabled:
         bg_thread = threading.Thread(target=background_git_checker, daemon=True)
         bg_thread.start()
     
-    # Main chat loop
     while True:
         try:
-            # Get user input with styled prompt
             user_input = console.input(get_input_prompt()).strip()
             
             if not user_input:
@@ -404,22 +368,17 @@ def chat(
             
             if user_input.lower() in ["exit", "quit", "q"]:
                 console.print("\n[yellow]👋 See you next time! Keep learning![/yellow]\n")
-                _stop_background.set()  # Stop background thread
+                _stop_background.set()
                 break
             
-            # Show user message
             render_user_message(console, user_input)
             
-            # Show thinking indicator
             render_thinking_indicator(console)
             
-            # Process through orchestration
             response = process_message(user_input)
             
-            # Clear thinking indicator line (move cursor up and clear)
             console.print("\033[A\033[K", end="")
             
-            # Display reply
             if response.get("error"):
                 render_error_message(console, "Processing Error", response['error'])
             elif response.get("reply"):

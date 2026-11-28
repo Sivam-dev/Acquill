@@ -10,6 +10,10 @@ from typing import Dict, Optional, Any
 import typer
 
 
+SHARED_SUPABASE_URL = "https://enwijksiguhakqsgzsig.supabase.co"
+SHARED_SUPABASE_ANON_KEY = "sb_publishable_9p18RyRNy899aCQZs0u_mA_HOlxy3MI"
+
+
 def get_config_path() -> Path:
     """Get the path to the user's configuration file"""
     config_dir = Path(typer.get_app_dir("acquill"))
@@ -47,16 +51,13 @@ def save_config(config: Dict[str, Any]) -> None:
     """
     config_path = get_config_path()
     
-    # Create directory if it doesn't exist
     config_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Save configuration
     try:
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=2)
         
-        # Restrict file permissions on Unix systems (chmod 600)
-        if os.name != 'nt':  # Not Windows
+        if os.name != 'nt':
             os.chmod(config_path, 0o600)
     except Exception as e:
         raise RuntimeError(f"Failed to save configuration: {e}")
@@ -74,10 +75,9 @@ def load_from_env() -> Optional[Dict[str, Any]]:
     jina_key = os.getenv("JINA_API_KEY")
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_KEY")
-    checkpoint_url = os.getenv("CHECKPOINT_DB_URL")
-    
-    # Check if all required variables exist
-    if not all([groq_key, jina_key, supabase_url, supabase_key, checkpoint_url]):
+    checkpoint_url = os.getenv("CHECKPOINT_DB_URL", "")
+
+    if not groq_key or not jina_key:
         return None
     
     return {
@@ -93,8 +93,8 @@ def load_from_env() -> Optional[Dict[str, Any]]:
             }
         },
         "database": {
-            "supabase_url": supabase_url,
-            "supabase_key": supabase_key,
+            "supabase_url": supabase_url or SHARED_SUPABASE_URL,
+            "supabase_key": supabase_key or SHARED_SUPABASE_ANON_KEY,
             "checkpoint_db_url": checkpoint_url
         },
         "git_check_interval": int(os.getenv("GIT_CHECK_INTERVAL", "300")),
@@ -107,17 +107,14 @@ def get_config() -> Dict[str, Any]:
     Get configuration from config.json or fall back to .env.
     Raises RuntimeError if no configuration is found.
     """
-    # Try config.json first
     config = load_config()
     if config is not None:
         return config
     
-    # Fall back to .env
     config = load_from_env()
     if config is not None:
         return config
     
-    # No configuration found
     raise RuntimeError(
         "No configuration found. Run 'acquill init' to set up Acquill."
     )
@@ -144,9 +141,9 @@ def migrate_from_env() -> Dict[str, Any]:
             }
         },
         "database": {
-            "supabase_url": os.getenv("SUPABASE_URL", ""),
-            "supabase_key": os.getenv("SUPABASE_KEY", ""),
-            "checkpoint_db_url": os.getenv("CHECKPOINT_DB_URL", "")
+            "supabase_url": os.getenv("SUPABASE_URL", "") or SHARED_SUPABASE_URL,
+            "supabase_key": os.getenv("SUPABASE_KEY", "") or SHARED_SUPABASE_ANON_KEY,
+            "checkpoint_db_url": ""
         },
         "git_check_interval": int(os.getenv("GIT_CHECK_INTERVAL", "300")),
         "git_monitoring": os.getenv("GIT_MONITORING", "true").lower() == "true"
@@ -161,7 +158,6 @@ def mask_credential(value: str, visible_chars: int = 4) -> str:
     if not value or len(value) <= visible_chars:
         return "****"
     
-    # For keys with prefixes (gsk_, jina_, sb_), show prefix + last chars
     if "_" in value[:10]:
         prefix = value.split("_")[0] + "_"
         masked = prefix + "*" * (len(value) - len(prefix) - visible_chars) + value[-visible_chars:]

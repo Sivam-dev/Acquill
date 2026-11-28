@@ -4,9 +4,9 @@ Pattern analysis nodes
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from acquill.models import PatternState
+from acquill.schemas import PatternState
 from acquill.prompts import PATTERN_ANALYSIS_SYSTEM_PROMPT
-from acquill.core import pattern_llm
+from acquill.models import llm
 from acquill.config.auth import supabase
 
 
@@ -56,7 +56,7 @@ def analyze_patterns_node(state: PatternState) -> PatternState:
             for p in patterns
         ])
         
-        response = pattern_llm.invoke([
+        response = llm.invoke([
             SystemMessage(content=PATTERN_ANALYSIS_SYSTEM_PROMPT),
             HumanMessage(content=f"Recurring patterns:\n{pattern_text}")
         ])

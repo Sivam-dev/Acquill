@@ -6,9 +6,9 @@ import json
 from datetime import datetime, timedelta
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from acquill.models import DigestState
+from acquill.schemas import DigestState
 from acquill.prompts import DIGEST_SYSTEM_PROMPT
-from acquill.core import digest_llm
+from acquill.models import llm
 from acquill.config.auth import supabase
 
 
@@ -76,7 +76,7 @@ Topics touched: {topics_touched}
 Confidence levels: {json.dumps(confidence_changes)}
 Recurring struggles: {json.dumps(recurring_struggles)}"""
         
-        response = digest_llm.invoke([
+        response = llm.invoke([
             SystemMessage(content=DIGEST_SYSTEM_PROMPT),
             HumanMessage(content=user_content)
         ])

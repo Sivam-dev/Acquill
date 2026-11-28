@@ -11,7 +11,6 @@ from rich.markdown import Markdown
 import random
 import time
 
-# Color scheme
 BRAND_PRIMARY = "bright_cyan"
 BRAND_SECONDARY = "bright_magenta"
 SUCCESS_COLOR = "bright_green"
@@ -20,10 +19,6 @@ ERROR_COLOR = "bright_red"
 MUTED_COLOR = "dim"
 CODE_STYLE = "monokai"
 
-# ASCII logo: banner("ACQUILL", { shadow: "rounded", effect: "still", fill: "█" })
-# from the ascii-rest skill (.agents/skills/ascii-rest). Solid fill because
-# some terminal fonts render the default ▓ shade as sparse dots.
-# Still frame baked in so startup needs no Node at runtime.
 ACQUILL_LOGO = """
   ████╮     ██████╮   ████╮   ██╮   ██╮ ██╮ ██╮       ██╮
 ██╭───██╮ ██╭─────╯ ██╭───██╮ ██│   ██│ ██│ ██│       ██│
@@ -33,7 +28,7 @@ ACQUILL_LOGO = """
       ╰─╯   ╰─╯   ╰─────╯   ╰─╯ ╰─╯   ╰───╯   ╰─╯ ╰───────╯ ╰───────╯
 """
 
-GLITCH_JUNK = "█▓▒░<>[]{}=+*#%@&01"
+NOISE_CHARS = "█▓▒░<>[]{}=+*#%@&01"
 
 TAGLINE = "Your AI companion with persistent memory."
 
@@ -42,7 +37,6 @@ def render_logo(console: Console, show_tagline: bool = True):
     """Display the ACQUILL ASCII logo with tagline"""
     logo_text = Text()
     
-    # Add logo in gradient effect (cyan to magenta)
     for i, line in enumerate(ACQUILL_LOGO.strip("\n").split('\n')):
         if i < 3:
             logo_text.append(line + "\n", style=BRAND_PRIMARY)
@@ -56,33 +50,52 @@ def render_logo(console: Console, show_tagline: bool = True):
     console.print(logo_text, justify="center")
 
 
-def _glitch_line(line, width):
-    """One flicker row: random cells flipped to junk, padded to width."""
-    chars = [
-        random.choice(GLITCH_JUNK) if ch != " " and random.random() < 0.12 else ch
-        for ch in line
-    ]
-    return "".join(chars).ljust(width)
+def _dissolve_frames():
+    """Build dissolve frames: banner resolving through noise in blobs.
 
-
-def _glitch_reveal(console: Console):
-    """Reveal the banner line by line with a junk flicker.
-
-    Uses only carriage returns, no screen clears, so terminals that
-    ignore clear-screen codes still show exactly 6 lines, never a stack.
+    Follows the ascii.rest skill's dissolve effect (comes through noise,
+    in blobs): each cell gets a threshold from its distance to a few
+    random seed cells plus jitter; frame by frame, cells past the
+    threshold flip from noise to their final letter.
     """
-    lines = [line.rstrip() for line in ACQUILL_LOGO.strip("\n").split("\n")]
-    width = max(len(line) for line in lines)
-    indent = " " * max((console.width - width) // 2, 0)
-    stream = console.file
-    for i, line in enumerate(lines):
-        for _ in range(2):
-            stream.write(indent + _glitch_line(line, width) + "\r")
-            stream.flush()
-            time.sleep(0.05)
-        row = Text()
-        row.append(line, style=BRAND_PRIMARY if i < 3 else BRAND_SECONDARY)
-        console.print(row, justify="center")
+    rows = [line.rstrip() for line in ACQUILL_LOGO.strip("\n").split("\n")]
+    width = max(len(line) for line in rows)
+    grid = [line.ljust(width) for line in rows]
+
+    cells = [(y, x) for y in range(len(grid)) for x in range(width)
+             if grid[y][x] != " "]
+    seeds = random.sample(cells, min(6, len(cells)))
+    maxdist = max(width, len(grid)) or 1
+
+    def threshold(y, x):
+        nearest = min(abs(y - sy) + abs(x - sx) for sy, sx in seeds)
+        return min(1.0, max(0.0, nearest / maxdist + random.uniform(-0.15, 0.15)))
+
+    limits = [[threshold(y, x) for x in range(width)] for y in range(len(grid))]
+    frames = []
+    steps = 7
+    for f in range(steps):
+        level = (f + 1) / steps
+        frame = Text()
+        for i, line in enumerate(grid):
+            style = BRAND_PRIMARY if i < 3 else BRAND_SECONDARY
+            for x, ch in enumerate(line):
+                if ch == " " or limits[i][x] <= level:
+                    frame.append(ch, style=style)
+                else:
+                    frame.append(random.choice(NOISE_CHARS), style="dim")
+            frame.append("\n")
+        frames.append(frame)
+    return frames
+
+
+def _dissolve_reveal(console: Console):
+    """Play the dissolve once, in place; the still banner stays behind."""
+    frames = _dissolve_frames()
+    with Live(frames[0], console=console, auto_refresh=False, transient=False) as live:
+        for frame in frames[1:]:
+            time.sleep(0.09)
+            live.update(frame, refresh=True)
     tagline = Text()
     tagline.append(TAGLINE, style="italic dim")
     console.print(tagline, justify="center")
@@ -93,17 +106,15 @@ def render_startup_screen(console: Console):
     console.clear()
     console.print()
 
-    # Flicker reveal on real terminals; one still frame in pipes/logs.
     try:
         if console.is_terminal:
-            _glitch_reveal(console)
+            _dissolve_reveal(console)
         else:
             render_logo(console, show_tagline=True)
     except Exception:
         render_logo(console, show_tagline=True)
     console.print()
     
-    # Status indicators
     status_text = Text()
     status_text.append("  ◉ ", style=SUCCESS_COLOR)
     status_text.append("Initializing session...", style=MUTED_COLOR)
@@ -142,7 +153,6 @@ def render_welcome_panel(console: Console, check_interval: int = 300, git_enable
     
     console.print(panel)
     
-    # Git monitoring status
     status_line = Text()
     if git_enabled:
         status_line.append("◉ ", style=SUCCESS_COLOR)
@@ -174,7 +184,6 @@ def render_user_message(console: Console, message: str):
 
 def render_assistant_message(console: Console, message: str):
     """Display an assistant message with markdown support"""
-    # Try to render as markdown, fall back to plain text
     try:
         content = Markdown(message)
     except Exception:
@@ -203,21 +212,17 @@ def render_thinking_indicator(console: Console, message: str = "Acquill is think
 def render_git_analysis(console: Console, files_changed: int, files_summary: str, 
                        topic: str, event_type: str, analysis: str):
     """Display git diff analysis in a structured format"""
-    # Create analysis content
     content = Text()
     
-    # Files changed
     content.append("📁 Modified Files\n", style=f"bold {BRAND_SECONDARY}")
     content.append(f"   {files_changed} file(s): ", style="dim")
     content.append(f"{files_summary}\n\n", style="")
     
-    # Topic and event
     content.append("📚 Topic: ", style=f"bold {WARNING_COLOR}")
     content.append(f"{topic}\n", style="")
     content.append("⚡ Event: ", style=f"bold {BRAND_PRIMARY}")
     content.append(f"{event_type}\n\n", style="")
     
-    # Analysis
     content.append("💬 Analysis\n", style=f"bold {SUCCESS_COLOR}")
     content.append(f"{analysis}", style="")
     
@@ -286,7 +291,6 @@ def render_config_display(console: Console, config: dict):
     ))
     console.print()
     
-    # LLM Provider
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Key", style="bold")
     table.add_column("Value")
@@ -297,7 +301,6 @@ def render_config_display(console: Console, config: dict):
     console.print(table)
     console.print()
     
-    # Embedding Provider
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Key", style="bold")
     table.add_column("Value")
@@ -308,7 +311,6 @@ def render_config_display(console: Console, config: dict):
     console.print(table)
     console.print()
     
-    # Database
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Key", style="bold")
     table.add_column("Value")
@@ -316,7 +318,7 @@ def render_config_display(console: Console, config: dict):
     console.print("[bold]Database[/bold]")
     table.add_row("Supabase URL", config['database']['supabase_url'])
     table.add_row("Supabase Key", config['database']['supabase_key'])
-    table.add_row("Checkpoint DB", config['database']['checkpoint_db_url'])
+    table.add_row("Checkpoint DB", config['database'].get('checkpoint_db_url') or 'in-memory sessions (not used)')
     console.print(table)
     console.print()
 

@@ -1,16 +1,13 @@
 """
-Models package - State definitions and Pydantic schemas
+Models package - LLM and embedding clients plus placement knowledge
 """
 
-from .states import LearningState, ReminderState, DigestState, PatternState
-from .schemas import ExtractedEvent, DiffAnalysis, QuizQuestion
+from .llm import (
+    embeddings,
+    llm
+)
 
 __all__ = [
-    'LearningState',
-    'ReminderState', 
-    'DigestState',
-    'PatternState',
-    'ExtractedEvent',
-    'DiffAnalysis',
-    'QuizQuestion',
+    'embeddings',
+    'llm'
 ]

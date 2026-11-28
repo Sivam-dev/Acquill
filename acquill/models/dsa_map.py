@@ -8,11 +8,9 @@ import difflib
 import re
 
 DSA_PREREQUISITES = {
-    # Tier 1 - foundations
     "programming basics": (),
     "time and space complexity": ("programming basics",),
     "recursion": ("programming basics",),
-    # Tier 1 - arrays and strings
     "arrays": ("programming basics",),
     "strings": ("arrays",),
     "two pointers": ("arrays",),
@@ -20,18 +18,14 @@ DSA_PREREQUISITES = {
     "prefix sum": ("arrays",),
     "sorting": ("arrays", "time and space complexity", "recursion"),
     "binary search": ("arrays", "sorting"),
-    # Tier 1 - hashing
     "hash maps and sets": ("arrays", "time and space complexity"),
-    # Tier 1 - linked list, stack, queue
     "linked list": ("arrays", "programming basics"),
     "fast and slow pointers": ("linked list", "two pointers"),
     "stack": ("arrays",),
     "queue": ("arrays",),
-    # Tier 1 - trees
     "binary tree": ("recursion", "stack", "linked list"),
     "level-order traversal": ("binary tree", "queue"),
     "binary search tree": ("binary tree", "binary search"),
-    # Tier 2
     "backtracking": ("recursion", "arrays"),
     "heap": ("binary tree", "arrays"),
     "top-k problems": ("heap",),
@@ -43,7 +37,6 @@ DSA_PREREQUISITES = {
     "dynamic programming basics": ("recursion", "hash maps and sets"),
     "1d dp": ("dynamic programming basics",),
     "2d dp": ("1d dp",),
-    # Tier 3
     "trie": ("binary tree", "strings", "hash maps and sets"),
     "monotonic stack": ("stack", "arrays"),
     "union-find": ("arrays", "binary tree"),

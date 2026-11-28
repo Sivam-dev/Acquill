@@ -6,7 +6,7 @@ Convenience functions for external use
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
-from acquill.models import LearningState, ReminderState, DigestState, PatternState
+from acquill.schemas import LearningState, ReminderState, DigestState, PatternState
 from acquill.graphs.checkpoint import ensure_session_alive, get_thread_config
 from acquill.graphs.workflows import (
     build_chat_graph,

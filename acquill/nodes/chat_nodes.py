@@ -6,15 +6,15 @@ import logging
 from datetime import datetime, timedelta
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from acquill.models import LearningState, ExtractedEvent, DiffAnalysis
+from acquill.schemas import LearningState, ExtractedEvent, DiffAnalysis
 from acquill.prompts import (
     EXTRACT_SYSTEM_PROMPT_STRUCTURED,
     DIFF_ANALYSIS_PROMPT_STRUCTURED,
     REPLY_SYSTEM_PROMPT,
     QUIZ_CODING_PROMPT
 )
-from acquill.core import embeddings, extract_llm, diff_analysis_llm, reply_llm, quiz_llm
-from acquill.core.dsa_map import canonical, prerequisites
+from acquill.models import embeddings, llm
+from acquill.models.dsa_map import canonical, prerequisites
 from acquill.config.auth import supabase
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def extract_event_node(state: LearningState) -> LearningState:
         }
     
     try:
-        structured_llm = extract_llm.with_structured_output(ExtractedEvent)
+        structured_llm = llm.with_structured_output(ExtractedEvent)
         
         response = structured_llm.invoke([
             SystemMessage(content=EXTRACT_SYSTEM_PROMPT_STRUCTURED),
@@ -83,7 +83,7 @@ def analyze_diff_node(state: LearningState) -> LearningState:
         }
     
     try:
-        structured_llm = diff_analysis_llm.with_structured_output(DiffAnalysis)
+        structured_llm = llm.with_structured_output(DiffAnalysis)
         
         user_content = f"File: {filepath}\n\nDiff:\n{diff}"
         
@@ -337,7 +337,7 @@ def retrieve_similar_node(state: LearningState) -> LearningState:
 def _coding_question(topic_name):
     """Generate one short coding question for a weak prerequisite."""
     try:
-        response = quiz_llm.invoke([
+        response = llm.invoke([
             SystemMessage(content=QUIZ_CODING_PROMPT.format(topic=topic_name)),
             HumanMessage(content=f"Give me one coding question about {topic_name}.")
         ])
@@ -388,7 +388,7 @@ def generate_reply_node(state: LearningState) -> LearningState:
         context = "\n\n".join(context_parts)
         
         history = state.get("messages") or []
-        response = reply_llm.invoke([
+        response = llm.invoke([
             SystemMessage(content=REPLY_SYSTEM_PROMPT),
             *history,
             HumanMessage(content=context)
