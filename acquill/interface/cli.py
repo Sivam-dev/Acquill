@@ -233,7 +233,22 @@ def _require_session():
     """Restore the saved login into the in-memory client, or exit cleanly."""
     if not restore_session():
         console.print("[yellow]Not logged in. Run `acquill login` first.[/yellow]")
+        console.print("[dim]New here? Run `acquill init` for API keys, then `acquill signup`.[/dim]")
         raise typer.Exit()
+
+
+def _remind_about_keys():
+    """Remind the user to add Groq/Jina keys if they are missing."""
+    try:
+        config = get_config()
+        providers = config.get("providers", {})
+        groq_ok = bool(providers.get("groq", {}).get("api_key"))
+        jina_ok = bool(providers.get("jina", {}).get("api_key"))
+    except Exception:
+        groq_ok = jina_ok = False
+    if not (groq_ok and jina_ok):
+        console.print("[yellow]Heads up: chat also needs your Groq + Jina API keys.[/yellow]")
+        console.print("[dim]Run `acquill init` to add them (before or after logging in).[/dim]\n")
 
 
 def background_git_checker():
@@ -449,6 +464,7 @@ def patterns():
 def signup():
     """Create a new Acquill account"""
     console.print("\n[bold cyan]📝 Sign Up for Acquill[/bold cyan]\n")
+    _remind_about_keys()
     
     email = console.input("[cyan]Email:[/cyan] ").strip()
     
@@ -477,6 +493,7 @@ def signup():
 def login():
     """Login to your Acquill account"""
     console.print("\n[bold cyan]🔐 Login to Acquill[/bold cyan]\n")
+    _remind_about_keys()
     
     email = console.input("[cyan]Email:[/cyan] ").strip()
     
