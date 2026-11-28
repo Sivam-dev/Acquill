@@ -22,16 +22,10 @@ def _ensure_supabase():
         SUPABASE_KEY = config["database"]["supabase_key"]
     except Exception:
         from dotenv import load_dotenv
+        from .settings import SHARED_SUPABASE_URL, SHARED_SUPABASE_ANON_KEY
         load_dotenv()
-        SUPABASE_URL = os.getenv("SUPABASE_URL")
-        SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-    
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise ValueError(
-            "SUPABASE_URL and SUPABASE_KEY required.\n"
-            "Run 'acquill init' to configure Acquill or add them to .env file.\n"
-            "Get them from: https://supabase.com/dashboard/project/_/settings"
-        )
+        SUPABASE_URL = os.getenv("SUPABASE_URL") or SHARED_SUPABASE_URL
+        SUPABASE_KEY = os.getenv("SUPABASE_KEY") or SHARED_SUPABASE_ANON_KEY
     
     _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     return _supabase_client

@@ -19,7 +19,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 
 from acquill.utils.api import process_message, process_diff, check_and_send_reminders, generate_weekly_digest, analyze_learning_patterns
-from acquill.config.auth import signup as auth_signup, signin as auth_signin, signout as auth_signout, get_current_user, restore_session, supabase
+from acquill.config.auth import signup as auth_signup, signin as auth_signin, signout as auth_signout, get_current_user, restore_session, supabase, SESSION_FILE
 from acquill.config import (
     config_exists,
     get_config,
@@ -232,8 +232,12 @@ def config_cmd(
 def _require_session():
     """Restore the saved login into the in-memory client, or exit cleanly."""
     if not restore_session():
-        console.print("[yellow]Not logged in. Run `acquill login` first.[/yellow]")
-        console.print("[dim]New here? Run `acquill init` for API keys, then `acquill signup`.[/dim]")
+        if SESSION_FILE.exists():
+            console.print("[yellow]Session expired. Run `acquill login` again.[/yellow]")
+            console.print("[dim]Your Groq/Jina keys are still saved - you won't be asked for them again.[/dim]")
+        else:
+            console.print("[yellow]Not logged in. Run `acquill login` first.[/yellow]")
+            console.print("[dim]New here? Run `acquill init` for API keys, then `acquill signup`.[/dim]")
         raise typer.Exit()
 
 
@@ -514,6 +518,7 @@ def login():
             "Login successful!",
             "Welcome back! You can now use all Acquill features."
         )
+        console.print("[dim]Your session stays saved across restarts - no need to log in or re-enter keys again.[/dim]\n")
     except Exception as e:
         render_error_message(console, "Login failed", str(e))
 
