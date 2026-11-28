@@ -1,6 +1,5 @@
 # Acquill
 
-[![PyPI version](https://img.shields.io/pypi/v/acquill)](https://pypi.org/project/acquill/)
 [![Python](https://img.shields.io/badge/python-%3E%3D%203.10-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](https://github.com/Sivam-dev/Acquill/blob/main/LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Sivam-dev/Acquill)](https://github.com/Sivam-dev/Acquill/releases/latest)
